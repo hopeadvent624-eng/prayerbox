@@ -409,6 +409,14 @@ function SubmitScreen({ onSubmit }: { onSubmit: (name: string, request: string, 
   const [category, setCategory] = useState<Category>("Personal");
   const canSubmit = name.trim().length > 0 && request.trim().length > 0;
 
+    function copyLink(): void {
+        throw new Error("Function not implemented.");
+    }
+
+    function shareWhatsApp(): void {
+        throw new Error("Function not implemented.");
+    }
+
   return (
     <div className="min-h-screen bg-[#F5F6FA]">
       <div className="max-w-2xl mx-auto px-6 py-16">
@@ -456,10 +464,10 @@ function SubmitScreen({ onSubmit }: { onSubmit: (name: string, request: string, 
           <div>
             <p className="text-center text-[#7A85A3] text-sm font-medium mb-3">Share Prayerbox</p>
             <div className="flex gap-3">
-              <OutlineButton className="flex-1 gap-2" onClick={() => {}}>
+              <OutlineButton className="flex-1 gap-2" onClick={copyLink}>
                 <Copy size={14} /> Copy Link
               </OutlineButton>
-              <OutlineButton className="flex-1 gap-2" onClick={() => {}}>
+              <OutlineButton className="flex-1 gap-2" onClick={shareWhatsApp}>
                 <MessageCircle size={14} /> WhatsApp
               </OutlineButton>
             </div>
@@ -482,6 +490,22 @@ function SubmitScreen({ onSubmit }: { onSubmit: (name: string, request: string, 
 // ─── Screen 3: Success ────────────────────────────────────────────────────────
 
 function SuccessScreen({ onPray }: { onPray: () => void }) {
+  const getShareUrl = () => (typeof window !== "undefined" ? window.location.href : "https://ay-prayerbox.example");
+  const copyLink = async () => {
+    const url = getShareUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+      alert("Link copied to clipboard!");
+    } catch {
+      prompt("Copy this link:", url);
+    }
+  };
+  const shareWhatsApp = () => {
+    const url = getShareUrl();
+    const text = encodeURIComponent(`Check out AY Prayerbox:\n${url}`);
+    window.open(`https://wa.me/?text=${text}`, "_blank");
+  };
+
   return (
     <div className="min-h-screen bg-[#F5F6FA] flex items-center justify-center px-6">
       <div className="max-w-md w-full text-center">
@@ -507,8 +531,11 @@ function SuccessScreen({ onPray }: { onPray: () => void }) {
             <PrimaryButton onClick={onPray} className="gap-2">
               Pray For Someone <ChevronRight size={18} />
             </PrimaryButton>
-            <OutlineButton className="gap-2" onClick={() => {}}>
-              <Copy size={14} /> Share Prayerbox
+            <OutlineButton className="gap-2" onClick={copyLink}>
+              <Copy size={14} /> Copy Link
+            </OutlineButton>
+            <OutlineButton className="gap-2" onClick={shareWhatsApp}>
+              <MessageCircle size={14} /> WhatsApp
             </OutlineButton>
           </div>
         </motion.div>

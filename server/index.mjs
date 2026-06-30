@@ -1,10 +1,14 @@
 import { createServer } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dataFile = join(__dirname, "data.json");
+const dataFile = process.env.DATA_FILE
+  ? isAbsolute(process.env.DATA_FILE)
+    ? process.env.DATA_FILE
+    : join(__dirname, process.env.DATA_FILE)
+  : join(__dirname, "data.json");
 const port = Number(process.env.PORT || 4000);
 
 const categories = new Set(["Personal", "Health", "Family", "Studies", "Ministry", "Other"]);
@@ -62,6 +66,13 @@ function notFound(res) {
   sendJson(res, 404, { error: "Route not found" });
 }
 
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
 function sanitizeText(value, maxLength) {
   return String(value || "").trim().slice(0, maxLength);
 }
@@ -70,9 +81,14 @@ async function readBody(req) {
   let body = "";
   for await (const chunk of req) {
     body += chunk;
-    if (body.length > 20_000) throw new Error("Request body too large");
+    if (body.length > 20_000) throw new HttpError(413, "Request body too large");
   }
-  return body ? JSON.parse(body) : {};
+  if (!body) return {};
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new HttpError(400, "Invalid JSON body");
+  }
 }
 
 async function handleRequest(req, res) {
@@ -103,6 +119,16 @@ async function handleRequest(req, res) {
 
   if (method === "GET" && path === "/api/state") {
     sendJson(res, 200, data);
+    return;
+  }
+
+  if (method === "GET" && path === "/api/prayers") {
+    sendJson(res, 200, data.prayers);
+    return;
+  }
+
+  if (method === "GET" && path === "/api/testimonies") {
+    sendJson(res, 200, data.testimonies);
     return;
   }
 
@@ -213,6 +239,10 @@ async function handleRequest(req, res) {
 createServer((req, res) => {
   handleRequest(req, res).catch((error) => {
     console.error(error);
+    if (error instanceof HttpError) {
+      sendJson(res, error.status, { error: error.message });
+      return;
+    }
     sendJson(res, 500, { error: "Internal server error" });
   });
 }).listen(port, () => {
