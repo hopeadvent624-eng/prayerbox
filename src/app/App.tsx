@@ -248,8 +248,9 @@ function TopNav({ active, onNavigate }: { active: string; onNavigate: (s: Screen
 
 // ─── Screen 1: Splash / Hero ──────────────────────────────────────────────────
 
-function SplashScreen({ onStart, prayers, testimonies }: {
+function SplashScreen({ onStart, onPray, prayers, testimonies }: {
   onStart: () => void;
+  onPray: () => void;
   prayers: PrayerRequest[];
   testimonies: Testimony[];
 }) {
@@ -303,7 +304,7 @@ function SplashScreen({ onStart, prayers, testimonies }: {
           <PrimaryButton onClick={onStart} className="h-14 px-10 text-base gap-2.5">
             Submit a Prayer <Send size={16} />
           </PrimaryButton>
-          <OutlineButton onClick={() => onStart()} className="h-14 px-10 text-base gap-2">
+          <OutlineButton onClick={onPray} className="h-14 px-10 text-base gap-2">
             <HandHeart size={16} /> Pray for Someone
           </OutlineButton>
         </motion.div>
@@ -1291,7 +1292,7 @@ export default function App() {
           exit={{ opacity: 0, y: -12 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
         >
-          {screen === "splash" && <SplashScreen onStart={() => navigate("submit")} prayers={prayers} testimonies={testimonies} />}
+          {screen === "splash" && <SplashScreen onStart={() => navigate("submit")} onPray={() => navigate("pray")} prayers={prayers} testimonies={testimonies} />}
           {screen === "submit" && <SubmitScreen onSubmit={handleSubmitPrayer} />}
           {screen === "success" && <SuccessScreen onPray={() => navigate("pray")} />}
           {screen === "pray" && (
