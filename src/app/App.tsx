@@ -303,7 +303,7 @@ function SplashScreen({ onStart, prayers, testimonies }: {
           <PrimaryButton onClick={onStart} className="h-14 px-10 text-base gap-2.5">
             Submit a Prayer <Send size={16} />
           </PrimaryButton>
-          <OutlineButton onClick={() => {}} className="h-14 px-10 text-base gap-2">
+          <OutlineButton onClick={() => onStart()} className="h-14 px-10 text-base gap-2">
             <HandHeart size={16} /> Pray for Someone
           </OutlineButton>
         </motion.div>
