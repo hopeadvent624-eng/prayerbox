@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AY PrayerBox</string>
+    <string name="title_activity_main">AY PrayerBox</string>
+    <string name="package_name">com.ay.prayerbox</string>
+    <string name="custom_url_scheme">com.ay.prayerbox</string>
+</resources>
