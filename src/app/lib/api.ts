@@ -23,6 +23,7 @@ export interface Testimony {
 export interface PrayerboxState {
   prayers: PrayerRequest[];
   testimonies: Testimony[];
+  users: AuthUser[];
 }
 
 export interface AuthUser {

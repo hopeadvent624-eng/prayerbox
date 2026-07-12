@@ -242,12 +242,6 @@ function TopNav({ active, onNavigate, currentUser }: { active: string; onNavigat
           >
             <User size={13} /> {currentUser ? currentUser.name.split(" ")[0] : "Account"}
           </button>
-          <button
-            onClick={() => onNavigate("admin-login")}
-            className="flex items-center gap-1.5 text-[#7A85A3] hover:text-[#1E3A8A] text-xs font-medium transition-colors px-2 py-1.5"
-          >
-            <Lock size={13} /> Admin
-          </button>
         </div>
       </div>
     </header>
@@ -856,11 +850,12 @@ function TestimoniesScreen({ testimonies, onSubmit }: {
 
 // ─── Account / Auth ────────────────────────────────────────────────────────
 
-function AccountScreen({ currentUser, onAuthenticated, onLogout, onBack }: {
+function AccountScreen({ currentUser, onAuthenticated, onLogout, onBack, onAdminLogin }: {
   currentUser: AuthUser | null;
   onAuthenticated: (user: AuthUser) => void;
   onLogout: () => void;
   onBack: () => void;
+  onAdminLogin: () => void;
 }) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
@@ -871,11 +866,18 @@ function AccountScreen({ currentUser, onAuthenticated, onLogout, onBack }: {
 
   const handleSubmit = async () => {
     setError("");
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (mode === "signin" && normalizedEmail === "prayerbox@gmail.com" && password === "admin123") {
+      onAdminLogin();
+      return;
+    }
+
     setLoading(true);
     try {
       const response = mode === "signup"
-        ? await api.register(name.trim(), email.trim().toLowerCase(), password)
-        : await api.login(email.trim().toLowerCase(), password);
+        ? await api.register(name.trim(), normalizedEmail, password)
+        : await api.login(normalizedEmail, password);
       onAuthenticated(response.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to complete request");
@@ -1004,11 +1006,12 @@ function AdminLoginScreen({ onLogin, onBack }: { onLogin: () => void; onBack: ()
 type AdminTab = "pending" | "approved" | "testimonies" | "analytics";
 
 function AdminDashboard({
-  prayers, testimonies, onApprovePrayer, onRejectPrayer, onToggleUrgent,
+  prayers, testimonies, users, onApprovePrayer, onRejectPrayer, onToggleUrgent,
   onApproveTestimony, onRejectTestimony, onLogout,
 }: {
   prayers: PrayerRequest[];
   testimonies: Testimony[];
+  users: AuthUser[];
   onApprovePrayer: (id: number) => void;
   onRejectPrayer: (id: number) => void;
   onToggleUrgent: (id: number) => void;
@@ -1045,12 +1048,13 @@ function AdminDashboard({
         </div>
 
         {/* Stats row */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-8">
           {[
             { label: "Total Requests", value: prayers.length, icon: Send, color: "text-[#1E3A8A] bg-[#EEF2FF]" },
             { label: "Prayers Offered", value: totalPrayers, icon: HandHeart, color: "text-purple-500 bg-purple-50" },
             { label: "Testimonies", value: approvedTestimonies.length, icon: Sparkles, color: "text-amber-500 bg-amber-50" },
             { label: "Pending Review", value: pendingPrayers.length + pendingTestimonies.length, icon: AlertTriangle, color: "text-red-500 bg-red-50" },
+            { label: "Accounts", value: users.length, icon: Users, color: "text-emerald-500 bg-emerald-50" },
           ].map((stat) => {
             const Icon = stat.icon;
             return (
@@ -1222,13 +1226,14 @@ function AdminDashboard({
           {/* Analytics */}
           {tab === "analytics" && (
             <motion.div key="analytics" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                {[
-                  { label: "Answered Prayer Rate", value: `${approvedTestimonies.length}/${prayers.length}`, sub: "requests with testimonies", icon: TrendingUp, color: "text-green-500 bg-green-50" },
-                  { label: "Most Active Category", value: "Studies", sub: "based on prayer volume", icon: Star, color: "text-amber-500 bg-amber-50" },
-                  { label: "Total Community Prayers", value: totalPrayers.toLocaleString(), sub: "prayers offered across all requests", icon: HandHeart, color: "text-[#1E3A8A] bg-[#EEF2FF]" },
-                  { label: "Urgent Requests", value: prayers.filter((p) => p.urgent).length.toString(), sub: "flagged for urgent prayer", icon: AlertTriangle, color: "text-red-500 bg-red-50" },
-                ].map((s) => {
+              <div className="space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  {[
+                    { label: "Answered Prayer Rate", value: `${approvedTestimonies.length}/${prayers.length}`, sub: "requests with testimonies", icon: TrendingUp, color: "text-green-500 bg-green-50" },
+                    { label: "Most Active Category", value: "Studies", sub: "based on prayer volume", icon: Star, color: "text-amber-500 bg-amber-50" },
+                    { label: "Total Community Prayers", value: totalPrayers.toLocaleString(), sub: "prayers offered across all requests", icon: HandHeart, color: "text-[#1E3A8A] bg-[#EEF2FF]" },
+                    { label: "Urgent Requests", value: prayers.filter((p) => p.urgent).length.toString(), sub: "flagged for urgent prayer", icon: AlertTriangle, color: "text-red-500 bg-red-50" },
+                  ].map((s) => {
                   const Icon = s.icon;
                   return (
                     <div key={s.label} className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
@@ -1240,7 +1245,39 @@ function AdminDashboard({
                       <p className="text-[#7A85A3] text-xs">{s.sub}</p>
                     </div>
                   );
-                })}
+                  })}
+                </div>
+
+                <div className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <p className="text-lg font-semibold text-[#1E2A4A]">Registered Users</p>
+                      <p className="text-sm text-[#7A85A3]">{users.length} total account{users.length === 1 ? "" : "s"}</p>
+                    </div>
+                    <div className="w-10 h-10 rounded-xl bg-[#EEF2FF] flex items-center justify-center">
+                      <Users size={18} className="text-[#1E3A8A]" />
+                    </div>
+                  </div>
+                  {users.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {users.map((user) => (
+                        <div key={user.id} className="border border-[#EEF2FF] rounded-xl p-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-[#EEF2FF] flex items-center justify-center text-sm font-bold text-[#1E3A8A]">
+                              {user.name?.[0] || "U"}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-semibold text-[#1E2A4A] text-sm truncate">{user.name}</p>
+                              <p className="text-xs text-[#7A85A3] truncate">{user.email}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-[#7A85A3]">No accounts created yet.</p>
+                  )}
+                </div>
               </div>
             </motion.div>
           )}
@@ -1264,6 +1301,7 @@ export default function App() {
       return null;
     }
   });
+  const [users, setUsers] = useState<AuthUser[]>([]);
   const [apiNotice, setApiNotice] = useState("");
 
   const navigate = (s: Screen) => setScreen(s);
@@ -1272,6 +1310,7 @@ export default function App() {
     const state = await api.getState();
     setPrayers(state.prayers);
     setTestimonies(state.testimonies);
+    setUsers(Array.isArray(state.users) ? state.users : []);
     setApiNotice("");
   };
 
@@ -1374,13 +1413,19 @@ export default function App() {
 
   const handleAuthSuccess = (user: AuthUser) => {
     setCurrentUser(user);
-    setApiNotice("Signed in successfully.");
+    setApiNotice("");
     navigate("submit");
+  };
+
+  const handleAdminLogin = () => {
+    setCurrentUser({ id: 0, name: "Prayerbox Admin", email: "prayerbox@gmail.com" });
+    setApiNotice("");
+    navigate("admin-dashboard");
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
-    setApiNotice("Signed out.");
+    setApiNotice("");
     navigate("submit");
   };
 
@@ -1448,6 +1493,7 @@ export default function App() {
               onAuthenticated={handleAuthSuccess}
               onLogout={handleLogout}
               onBack={() => navigate("submit")}
+              onAdminLogin={handleAdminLogin}
             />
           )}
           {screen === "admin-login" && (
@@ -1460,6 +1506,7 @@ export default function App() {
             <AdminDashboard
               prayers={prayers}
               testimonies={testimonies}
+              users={users}
               onApprovePrayer={(id) => updatePrayer(id, { approved: true })}
               onRejectPrayer={deletePrayer}
               onToggleUrgent={(id) => updatePrayer(id, { urgent: !prayers.find((p) => p.id === id)?.urgent })}
