@@ -88,6 +88,24 @@ async function runTests() {
   assert.ok(Array.isArray(state.json.testimonies), "Expected state.testimonies array");
   log("/api/state OK");
 
+  const registerResponse = await request("/api/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Test User", email: "test@example.com", password: "secret123" }),
+  });
+  assert.strictEqual(registerResponse.response.status, 201, "Expected POST /api/auth/register to return 201");
+  assert.strictEqual(registerResponse.json.user.email, "test@example.com");
+  log("POST /api/auth/register OK");
+
+  const loginResponse = await request("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "test@example.com", password: "secret123" }),
+  });
+  assert.strictEqual(loginResponse.response.status, 200, "Expected POST /api/auth/login to return 200");
+  assert.strictEqual(loginResponse.json.user.email, "test@example.com");
+  log("POST /api/auth/login OK");
+
   const prayers = await request("/api/prayers");
   assert.strictEqual(prayers.response.status, 200, "Expected /api/prayers to return 200");
   assert.ok(Array.isArray(prayers.json), "Expected /api/prayers array");
@@ -110,7 +128,7 @@ async function runTests() {
   });
   assert.strictEqual(createPrayer.response.status, 201, "Expected POST /api/prayers to return 201");
   assert.strictEqual(createPrayer.json.name, newPrayer.name);
-  assert.strictEqual(createPrayer.json.approved, false);
+  assert.strictEqual(createPrayer.json.approved, true, "New prayers should be posted immediately");
   const prayerId = createPrayer.json.id;
   log("POST /api/prayers OK");
 
@@ -141,6 +159,7 @@ async function runTests() {
     body: JSON.stringify(newTestimony),
   });
   assert.strictEqual(createTestimony.response.status, 201, "Expected POST /api/testimonies to return 201");
+  assert.strictEqual(createTestimony.json.approved, true, "New testimonies should be posted immediately");
   const testimonyId = createTestimony.json.id;
   log("POST /api/testimonies OK");
 

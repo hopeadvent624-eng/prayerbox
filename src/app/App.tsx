@@ -20,6 +20,7 @@ import {
   CheckCircle,
   Users,
   Star,
+  User,
   Flame,
   AlertTriangle,
   TrendingUp,
@@ -28,7 +29,7 @@ import {
   Search,
 } from "lucide-react";
 import { api } from "./lib/api";
-import type { Category, PrayerRequest, Testimony } from "./lib/api";
+import type { AuthUser, Category, PrayerRequest, Testimony } from "./lib/api";
 // @ts-ignore: Ignore missing type declarations for image import
 import prayingHandsLogo from "../imports/Asset_1.png";
 
@@ -40,6 +41,7 @@ type Screen =
   | "success"
   | "pray"
   | "testimonies"
+  | "account"
   | "admin-login"
   | "admin-dashboard";
 
@@ -51,8 +53,8 @@ const INITIAL_PRAYERS: PrayerRequest[] = [
   { id: 3, name: "Tapiwa", request: "God, please provide school fees for next term. My family is struggling.", category: "Studies", prayerCount: 15, approved: true },
   { id: 4, name: "Ruvimbo", request: "Pray for my family. We are going through a very tough season financially.", category: "Family", prayerCount: 8, approved: true },
   { id: 5, name: "Blessing", request: "I need strength in my ministry. Feeling weary and wondering if I am making a difference.", category: "Ministry", prayerCount: 12, approved: true },
-  { id: 6, name: "Chiedza", request: "Seeking God's direction for my future. I have two university offers and don't know which to choose.", category: "Personal", prayerCount: 0, approved: false },
-  { id: 7, name: "Tendai", request: "Please pray for my friend who has lost faith.", category: "Ministry", prayerCount: 0, approved: false },
+  { id: 6, name: "Chiedza", request: "Seeking God's direction for my future. I have two university offers and don't know which to choose.", category: "Personal", prayerCount: 0, approved: true },
+  { id: 7, name: "Tendai", request: "Please pray for my friend who has lost faith.", category: "Ministry", prayerCount: 0, approved: true },
 ];
 
 const INITIAL_TESTIMONIES: Testimony[] = [
@@ -62,7 +64,7 @@ const INITIAL_TESTIMONIES: Testimony[] = [
   { id: 4, name: "Ruvimbo", text: "Our family situation turned around. God restored what was broken.", category: "Family", daysAgo: 31, prayerCount: 42, approved: true },
   { id: 5, name: "Chiedza", text: "I prayed for peace and God gave me far more than I asked for.", category: "Personal", daysAgo: 7, prayerCount: 28, approved: true },
   { id: 6, name: "Farai", text: "My job application was accepted. Been jobless for 8 months. Never stop praying.", category: "Personal", daysAgo: 2, prayerCount: 56, approved: true },
-  { id: 7, name: "Natsai", text: "Submitted for review.", category: "Ministry", daysAgo: 1, prayerCount: 0, approved: false },
+  { id: 7, name: "Natsai", text: "Shared publicly.", category: "Ministry", daysAgo: 1, prayerCount: 0, approved: true },
 ];
 
 const DAILY_VERSE = {
@@ -192,7 +194,7 @@ function ImageWithFallback({ src, alt, className }: { src: string; alt?: string;
 
 // ─── Top Nav ──────────────────────────────────────────────────────────────────
 
-function TopNav({ active, onNavigate }: { active: string; onNavigate: (s: Screen) => void }) {
+function TopNav({ active, onNavigate, currentUser }: { active: string; onNavigate: (s: Screen) => void; currentUser: AuthUser | null }) {
   const links = [
     { key: "submit", label: "Home", icon: Home, screen: "submit" as Screen },
     { key: "pray", label: "Pray", icon: HandHeart, screen: "pray" as Screen },
@@ -234,6 +236,12 @@ function TopNav({ active, onNavigate }: { active: string; onNavigate: (s: Screen
           <PrimaryButton onClick={() => onNavigate("submit")} className="hidden sm:flex h-9 px-4 text-xs gap-1.5">
             <Send size={13} /> Submit Prayer
           </PrimaryButton>
+          <button
+            onClick={() => onNavigate("account")}
+            className="flex items-center gap-1.5 text-[#7A85A3] hover:text-[#1E3A8A] text-xs font-medium transition-colors px-2 py-1.5"
+          >
+            <User size={13} /> {currentUser ? currentUser.name.split(" ")[0] : "Account"}
+          </button>
           <button
             onClick={() => onNavigate("admin-login")}
             className="flex items-center gap-1.5 text-[#7A85A3] hover:text-[#1E3A8A] text-xs font-medium transition-colors px-2 py-1.5"
@@ -404,11 +412,15 @@ function SplashScreen({ onStart, onPray, prayers, testimonies }: {
 
 // ─── Screen 2: Submit Prayer ──────────────────────────────────────────────────
 
-function SubmitScreen({ onSubmit }: { onSubmit: (name: string, request: string, category: Category) => void }) {
-  const [name, setName] = useState("");
+function SubmitScreen({ onSubmit, defaultName }: { onSubmit: (name: string, request: string, category: Category) => void; defaultName?: string }) {
+  const [name, setName] = useState(defaultName ?? "");
   const [request, setRequest] = useState("");
   const [category, setCategory] = useState<Category>("Personal");
   const canSubmit = name.trim().length > 0 && request.trim().length > 0;
+
+  useEffect(() => {
+    setName(defaultName ?? "");
+  }, [defaultName]);
 
     function copyLink(): void {
         throw new Error("Function not implemented.");
@@ -527,7 +539,7 @@ function SuccessScreen({ onPray }: { onPray: () => void }) {
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
           <h2 className="text-3xl font-bold text-[#1E2A4A] mb-2">Request Sent</h2>
           <p className="text-[#7A85A3] mb-2">Your prayer is safe with God and AY.</p>
-          <p className="text-[#9AA3BC] text-sm mb-8">Leaders will review your request before it goes live.</p>
+          <p className="text-[#9AA3BC] text-sm mb-8">Your prayer request is now live for the community to pray over.</p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <PrimaryButton onClick={onPray} className="gap-2">
               Pray For Someone <ChevronRight size={18} />
@@ -763,7 +775,7 @@ function TestimoniesScreen({ testimonies, onSubmit }: {
             {sent ? (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="h-12 rounded-xl bg-green-50 border border-green-200 flex items-center justify-center gap-2">
                 <CheckCircle size={16} className="text-green-500" />
-                <span className="text-green-700 text-sm font-semibold">Testimony submitted for review!</span>
+                <span className="text-green-700 text-sm font-semibold">Testimony published live!</span>
               </motion.div>
             ) : (
               <PrimaryButton onClick={handleSend} disabled={!name.trim() || !text.trim()} className="w-full h-12 gap-2">
@@ -836,6 +848,103 @@ function TestimoniesScreen({ testimonies, onSubmit }: {
               </div>
             </motion.div>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Account / Auth ────────────────────────────────────────────────────────
+
+function AccountScreen({ currentUser, onAuthenticated, onLogout, onBack }: {
+  currentUser: AuthUser | null;
+  onAuthenticated: (user: AuthUser) => void;
+  onLogout: () => void;
+  onBack: () => void;
+}) {
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    setError("");
+    setLoading(true);
+    try {
+      const response = mode === "signup"
+        ? await api.register(name.trim(), email.trim().toLowerCase(), password)
+        : await api.login(email.trim().toLowerCase(), password);
+      onAuthenticated(response.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to complete request");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F5F6FA] flex items-center justify-center px-6 py-16">
+      <div className="max-w-md w-full">
+        <div className="text-center mb-8">
+          <div className="w-20 h-20 rounded-2xl bg-white flex items-center justify-center mx-auto mb-5" style={{ boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
+            <User size={30} className="text-[#1E3A8A]" strokeWidth={1.5} />
+          </div>
+          <h2 className="text-2xl font-bold text-[#1E2A4A]">Your Account</h2>
+          <p className="text-[#9AA3BC] text-sm mt-1">Create an account or sign in to post with your name.</p>
+        </div>
+
+        <div className="bg-white rounded-2xl p-7 space-y-4" style={{ boxShadow: "0 4px 24px rgba(30,58,138,0.08)" }}>
+          {currentUser ? (
+            <div className="space-y-4">
+              <div className="rounded-xl bg-[#EEF2FF] p-4 text-center">
+                <p className="text-[#1E3A8A] font-semibold">Signed in as {currentUser.name}</p>
+                <p className="text-[#7A85A3] text-sm mt-1">{currentUser.email}</p>
+              </div>
+              <PrimaryButton onClick={onLogout} className="w-full h-12 gap-2">
+                <LogOut size={14} /> Sign Out
+              </PrimaryButton>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#F5F6FA] p-1">
+                <button onClick={() => setMode("signin")} className={cn("h-10 rounded-lg text-sm font-semibold transition-colors", mode === "signin" ? "bg-white text-[#1E3A8A] shadow-sm" : "text-[#7A85A3]")}>
+                  Sign In
+                </button>
+                <button onClick={() => setMode("signup")} className={cn("h-10 rounded-lg text-sm font-semibold transition-colors", mode === "signup" ? "bg-white text-[#1E3A8A] shadow-sm" : "text-[#7A85A3]")}>
+                  Create Account
+                </button>
+              </div>
+
+              {mode === "signup" && (
+                <div>
+                  <label className="block text-sm font-semibold text-[#1E2A4A] mb-2">Full Name</label>
+                  <TextInput placeholder="e.g. Tinashe" value={name} onChange={setName} maxLength={30} />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-semibold text-[#1E2A4A] mb-2">Email</label>
+                <TextInput type="email" placeholder="you@example.com" value={email} onChange={setEmail} maxLength={120} />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-[#1E2A4A] mb-2">Password</label>
+                <TextInput type="password" placeholder="Enter a password" value={password} onChange={setPassword} maxLength={80} />
+              </div>
+
+              {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+
+              <PrimaryButton onClick={handleSubmit} disabled={loading || !email.trim() || !password.trim() || (mode === "signup" && !name.trim())} className="w-full h-12 gap-2">
+                {loading ? "Please wait..." : mode === "signup" ? "Create Account" : "Sign In"}
+              </PrimaryButton>
+            </>
+          )}
+
+          <button onClick={onBack} className="w-full text-center text-[#9AA3BC] text-sm hover:text-[#7A85A3] transition-colors flex items-center justify-center gap-1">
+            <ArrowLeft size={13} /> Back
+          </button>
         </div>
       </div>
     </div>
@@ -1014,14 +1123,11 @@ function AdminDashboard({
                             </div>
                             <p className="text-[#2D3A5E] text-sm leading-relaxed mb-4">{p.request}</p>
                             <div className="flex gap-2 flex-wrap">
-                              <motion.button whileTap={{ scale: 0.95 }} onClick={() => onApprovePrayer(p.id)} className="flex-1 h-9 rounded-lg bg-green-500 text-white text-xs font-semibold flex items-center justify-center gap-1 min-w-0">
-                                <Check size={12} /> Approve
-                              </motion.button>
                               <motion.button whileTap={{ scale: 0.95 }} onClick={() => onToggleUrgent(p.id)} className="h-9 px-3 rounded-lg bg-orange-100 text-orange-600 text-xs font-semibold flex items-center justify-center gap-1">
                                 <AlertTriangle size={12} /> Urgent
                               </motion.button>
                               <motion.button whileTap={{ scale: 0.95 }} onClick={() => onRejectPrayer(p.id)} className="flex-1 h-9 rounded-lg bg-red-500 text-white text-xs font-semibold flex items-center justify-center gap-1 min-w-0">
-                                <X size={12} /> Reject
+                                <X size={12} /> Delete
                               </motion.button>
                             </div>
                           </motion.div>
@@ -1045,11 +1151,8 @@ function AdminDashboard({
                             </div>
                             <p className="text-[#2D3A5E] text-sm leading-relaxed mb-4">{t.text}</p>
                             <div className="flex gap-2">
-                              <motion.button whileTap={{ scale: 0.95 }} onClick={() => onApproveTestimony(t.id)} className="flex-1 h-9 rounded-lg bg-green-500 text-white text-xs font-semibold flex items-center justify-center gap-1">
-                                <Check size={12} /> Approve
-                              </motion.button>
                               <motion.button whileTap={{ scale: 0.95 }} onClick={() => onRejectTestimony(t.id)} className="flex-1 h-9 rounded-lg bg-red-500 text-white text-xs font-semibold flex items-center justify-center gap-1">
-                                <X size={12} /> Reject
+                                <X size={12} /> Delete
                               </motion.button>
                             </div>
                           </motion.div>
@@ -1153,6 +1256,14 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("splash");
   const [prayers, setPrayers] = useState<PrayerRequest[]>(INITIAL_PRAYERS);
   const [testimonies, setTestimonies] = useState<Testimony[]>(INITIAL_TESTIMONIES);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    try {
+      const saved = localStorage.getItem("ayp_currentUser");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [apiNotice, setApiNotice] = useState("");
 
   const navigate = (s: Screen) => setScreen(s);
@@ -1170,12 +1281,24 @@ export default function App() {
     });
   }, []);
 
+  useEffect(() => {
+    try {
+      if (currentUser) {
+        localStorage.setItem("ayp_currentUser", JSON.stringify(currentUser));
+      } else {
+        localStorage.removeItem("ayp_currentUser");
+      }
+    } catch {
+      // localStorage unavailable
+    }
+  }, [currentUser]);
+
   const handleSubmitPrayer = async (name: string, request: string, category: Category) => {
     try {
       await api.submitPrayer(name, request, category);
       await refreshState();
     } catch {
-      setPrayers((prev) => [...prev, { id: Date.now(), name, request, category, prayerCount: 0, approved: false }]);
+      setPrayers((prev) => [...prev, { id: Date.now(), name, request, category, prayerCount: 0, approved: true }]);
       setApiNotice("Backend offline - saved only in this browser session.");
     }
     navigate("success");
@@ -1200,7 +1323,7 @@ export default function App() {
       await api.submitTestimony(name, text);
       await refreshState();
     } catch {
-      setTestimonies((prev) => [...prev, { id: Date.now(), name, text, category: "Personal", daysAgo: 0, prayerCount: 0, approved: false }]);
+      setTestimonies((prev) => [...prev, { id: Date.now(), name, text, category: "Personal", daysAgo: 0, prayerCount: 0, approved: true }]);
       setApiNotice("Backend offline - saved only in this browser session.");
     }
   };
@@ -1249,6 +1372,18 @@ export default function App() {
     }
   };
 
+  const handleAuthSuccess = (user: AuthUser) => {
+    setCurrentUser(user);
+    setApiNotice("Signed in successfully.");
+    navigate("submit");
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setApiNotice("Signed out.");
+    navigate("submit");
+  };
+
   const navActive = (): string => {
     if (screen === "submit" || screen === "success") return "submit";
     if (screen === "pray") return "pray";
@@ -1256,7 +1391,7 @@ export default function App() {
     return "";
   };
 
-  const showNav = !["splash", "admin-login", "admin-dashboard"].includes(screen);
+  const showNav = !["splash", "admin-login", "admin-dashboard", "account"].includes(screen);
 
   return (
     <div className="min-h-screen bg-background font-['Inter',sans-serif]">
@@ -1266,7 +1401,7 @@ export default function App() {
         </div>
       )}
 
-      {showNav && <TopNav active={navActive()} onNavigate={navigate} />}
+      {showNav && <TopNav active={navActive()} onNavigate={navigate} currentUser={currentUser} />}
 
       {screen === "admin-dashboard" && (
         <header className="bg-white border-b border-[#EEF2FF] sticky top-0 z-40">
@@ -1293,7 +1428,7 @@ export default function App() {
           transition={{ duration: 0.2, ease: "easeOut" }}
         >
           {screen === "splash" && <SplashScreen onStart={() => navigate("submit")} onPray={() => navigate("pray")} prayers={prayers} testimonies={testimonies} />}
-          {screen === "submit" && <SubmitScreen onSubmit={handleSubmitPrayer} />}
+          {screen === "submit" && <SubmitScreen onSubmit={handleSubmitPrayer} defaultName={currentUser?.name?.split(" ")[0]} />}
           {screen === "success" && <SuccessScreen onPray={() => navigate("pray")} />}
           {screen === "pray" && (
             <PrayScreen
@@ -1305,6 +1440,14 @@ export default function App() {
             <TestimoniesScreen
               testimonies={testimonies}
               onSubmit={handleSubmitTestimony}
+            />
+          )}
+          {screen === "account" && (
+            <AccountScreen
+              currentUser={currentUser}
+              onAuthenticated={handleAuthSuccess}
+              onLogout={handleLogout}
+              onBack={() => navigate("submit")}
             />
           )}
           {screen === "admin-login" && (

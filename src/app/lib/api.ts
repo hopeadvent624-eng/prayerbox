@@ -25,25 +25,89 @@ export interface PrayerboxState {
   testimonies: Testimony[];
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
+export interface AuthUser {
+  id: number;
+  name: string;
+  email: string;
+}
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const url = API_BASE_URL ? `${API_BASE_URL}${path}` : path;
-  const response = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    ...options,
-  });
+const CONFIGURED_API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "";
 
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Request failed with ${response.status}`);
+async function readErrorMessage(response: Response): Promise<string> {
+  const contentType = response.headers.get("content-type") || "";
+  let message = `Request failed with ${response.status}`;
+
+  if (contentType.includes("application/json")) {
+    try {
+      const data = await response.json();
+      message = typeof data === "string" ? data : data.error || data.message || message;
+    } catch {
+      // fall back to plain text below
+    }
   }
 
-  return response.json() as Promise<T>;
+  if (message === `Request failed with ${response.status}`) {
+    try {
+      const text = await response.text();
+      if (text) message = text;
+    } catch {
+      // ignore
+    }
+  }
+
+  return message;
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const urls = [] as string[];
+  if (CONFIGURED_API_BASE_URL) {
+    urls.push(`${CONFIGURED_API_BASE_URL}${path}`);
+  }
+  urls.push(path);
+
+  let lastError: Error | undefined;
+
+  for (const [index, url] of urls.entries()) {
+    try {
+      const response = await fetch(url, {
+        headers: { "Content-Type": "application/json", ...options?.headers },
+        ...options,
+      });
+
+      if (response.ok) {
+        return response.json() as Promise<T>;
+      }
+
+      if (response.status === 404 && index === 0 && urls.length > 1) {
+        continue;
+      }
+
+      throw new Error(await readErrorMessage(response));
+    } catch (error) {
+      if (error instanceof Error) {
+        lastError = error;
+      }
+      if (index === urls.length - 1 || !(error instanceof Error && error.message.includes("Route not found"))) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError ?? new Error("Request failed");
 }
 
 export const api = {
   getState: () => request<PrayerboxState>("/api/state"),
+  register: (name: string, email: string, password: string) =>
+    request<{ user: AuthUser }> ("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password }),
+    }),
+  login: (email: string, password: string) =>
+    request<{ user: AuthUser }> ("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
   submitPrayer: (name: string, prayerRequest: string, category: Category) =>
     request<PrayerRequest>("/api/prayers", {
       method: "POST",

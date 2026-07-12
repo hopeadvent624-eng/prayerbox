@@ -1,4 +1,27 @@
 {
+  "users": [
+    {
+      "id": 1,
+      "name": "Test",
+      "email": "test@example.com",
+      "password": "123456",
+      "createdAt": "2026-07-12T08:42:16.710Z"
+    },
+    {
+      "id": 2,
+      "name": "tino",
+      "email": "asher@gmail.com",
+      "password": "admin123",
+      "createdAt": "2026-07-12T08:53:44.689Z"
+    },
+    {
+      "id": 3,
+      "name": "Browser Test",
+      "email": "browser1783847184594@example.com",
+      "password": "secret123",
+      "createdAt": "2026-07-12T09:06:24.801Z"
+    }
+  ],
   "prayers": [
     {
       "id": 1,
@@ -13,7 +36,7 @@
       "name": "Amanda",
       "request": "My mother is having surgery next week. Please pray for her healing and the doctors.",
       "category": "Health",
-      "prayerCount": 24,
+      "prayerCount": 25,
       "approved": true,
       "urgent": true
     },
