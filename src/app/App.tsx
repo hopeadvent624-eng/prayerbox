@@ -1875,6 +1875,15 @@ export default function App() {
     });
   }, []);
 
+  // Auto-refresh every 10 seconds while the admin dashboard is open
+  useEffect(() => {
+    if (screen !== "admin-dashboard") return;
+    const id = window.setInterval(() => {
+      refreshState().catch(() => {});
+    }, 10_000);
+    return () => window.clearInterval(id);
+  }, [screen]);
+
   useEffect(() => {
     try {
       if (currentUser) {
@@ -1987,6 +1996,7 @@ export default function App() {
     setCurrentUser({ id: 0, name: "Prayerbox Admin", email: "prayerbox@gmail.com" });
     setApiNotice("");
     navigate("admin-dashboard");
+    refreshState().catch(() => {});
   };
 
   const handleLogout = () => {
