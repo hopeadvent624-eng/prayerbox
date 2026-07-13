@@ -99,7 +99,7 @@ function nextId(items) {
                                                                                                                                               let body = "";
                                                                                                                                                 for await (const chunk of req) {
                                                                                                                                                     body += chunk;
-                                                                                                                                                        if (body.length > 20_000) throw new HttpError(413, "Request body too large");
+                                                                                                                                                        if (body.length > 2_000_000) throw new HttpError(413, "Request body too large");
                                                                                                                                                           }
                                                                                                                                                             if (!body) return {};
                                                                                                                                                               try {

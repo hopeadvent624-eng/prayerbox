@@ -180,6 +180,31 @@ function Textarea({ placeholder, value, onChange, maxLength, rows = 5 }: {
   );
 }
 
+function compressImageDataUrl(dataUrl: string, maxWidth = 640, quality = 0.8): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const scale = Math.min(1, maxWidth / Math.max(image.width, image.height));
+      const width = Math.max(1, Math.round(image.width * scale));
+      const height = Math.max(1, Math.round(image.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+
+      const context = canvas.getContext("2d");
+      if (!context) {
+        reject(new Error("Unable to process image"));
+        return;
+      }
+
+      context.drawImage(image, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    image.onerror = () => reject(new Error("Unable to load image"));
+    image.src = dataUrl;
+  });
+}
+
 // Simple ImageWithFallback component to avoid missing identifier errors
 function ImageWithFallback({ src, alt, className }: { src: string; alt?: string; className?: string }) {
   return (
@@ -1055,10 +1080,15 @@ function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, o
     }
 
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const result = typeof reader.result === "string" ? reader.result : "";
-      setAvatar(result);
-      setError("");
+      try {
+        const compressed = await compressImageDataUrl(result);
+        setAvatar(compressed);
+        setError("");
+      } catch {
+        setError("The photo could not be read. Please try another image.");
+      }
     };
     reader.onerror = () => {
       setError("The photo could not be read. Please try another image.");
