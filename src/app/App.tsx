@@ -31,7 +31,7 @@ import {
   Search,
 } from "lucide-react";
 import { api } from "./lib/api";
-import type { AuthUser, Category, PrayerRequest, Testimony } from "./lib/api";
+import type { AuthSession, AuthUser, Category, PrayerRequest, Testimony } from "./lib/api";
 // @ts-ignore: Ignore missing type declarations for image import
 import prayingHandsLogo from "../imports/Asset_1.png";
 
@@ -1053,13 +1053,12 @@ function TestimoniesScreen({ testimonies, onSubmit }: {
 
 // ─── Account / Auth ────────────────────────────────────────────────────────
 
-function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, onLogout, onBack, onAdminLogin }: {
+function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, onLogout, onBack }: {
   currentUser: AuthUser | null;
   initialMode?: "signin" | "signup";
   onAuthenticated: (user: AuthUser) => void;
   onLogout: () => void;
   onBack: () => void;
-  onAdminLogin: () => void;
 }) {
   const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [name, setName] = useState("");
@@ -1099,11 +1098,6 @@ function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, o
   const handleSubmit = async () => {
     setError("");
     const normalizedEmail = email.trim().toLowerCase();
-
-    if (mode === "signin" && normalizedEmail === "prayerbox@gmail.com" && password === "admin123") {
-      onAdminLogin();
-      return;
-    }
 
     if (mode === "signup") {
       if (!name.trim()) {
@@ -1230,16 +1224,26 @@ function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, o
 
 // ─── Admin Login ──────────────────────────────────────────────────────────────
 
-function AdminLoginScreen({ onLogin, onBack }: { onLogin: () => void; onBack: () => void }) {
+function AdminLoginScreen({ onLogin, onBack }: { onLogin: (user: AuthUser) => void; onBack: () => void }) {
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
-    if (password === "admin123") {
-      onLogin();
-    } else {
-      setError(true);
-      setTimeout(() => setError(false), 2000);
+  const handleLogin = async () => {
+    setError("");
+    setLoading(true);
+    try {
+      const result = await api.login(email.trim().toLowerCase(), password);
+      if (result.user.role !== "admin") {
+        setError("This account does not have admin access.");
+        return;
+      }
+      onLogin(result.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to sign in.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1255,16 +1259,19 @@ function AdminLoginScreen({ onLogin, onBack }: { onLogin: () => void; onBack: ()
         </div>
 
         <div className="bg-white rounded-2xl p-7 space-y-4" style={{ boxShadow: "0 4px 24px rgba(30,58,138,0.08)" }}>
-          <div className={cn("rounded-xl overflow-hidden", error && "ring-2 ring-red-400")}>
+          <div className="rounded-xl overflow-hidden">
+            <TextInput type="email" placeholder="Admin email" value={email} onChange={setEmail} />
+          </div>
+          <div className={cn("rounded-xl overflow-hidden", Boolean(error) && "ring-2 ring-red-400")}>
             <TextInput type="password" placeholder="Password" value={password} onChange={setPassword} />
           </div>
           {error && (
             <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-red-400 text-xs text-center flex items-center justify-center gap-1">
-              <X size={12} /> Incorrect password. Try again.
+              <X size={12} /> {error}
             </motion.p>
           )}
-          <PrimaryButton onClick={handleLogin} className="w-full h-12 gap-2">
-            <Lock size={14} /> Login
+          <PrimaryButton onClick={handleLogin} disabled={loading || !email.trim() || !password.trim()} className="w-full h-12 gap-2">
+            <Lock size={14} /> {loading ? "Please wait..." : "Login"}
           </PrimaryButton>
           <button onClick={onBack} className="w-full text-center text-[#9AA3BC] text-sm hover:text-[#7A85A3] transition-colors flex items-center justify-center gap-1">
             <ArrowLeft size={13} /> Back
@@ -1278,7 +1285,8 @@ function AdminLoginScreen({ onLogin, onBack }: { onLogin: () => void; onBack: ()
 
 // ─── Admin Dashboard ──────────────────────────────────────────────────────────
 
-type AdminTab = "overview" | "pending" | "approved" | "testimonies" | "accounts" | "analytics";
+type AdminTab = "overview" | "pending" | "approved" | "testimonies" | "accounts" | "sessions" | "analytics";
+type SessionFilter = "active" | "revoked" | "all";
 
 function AdminDashboard({
   prayers, testimonies, users, onApprovePrayer, onRejectPrayer, onToggleUrgent,
@@ -1297,6 +1305,16 @@ function AdminDashboard({
 }) {
   const [tab, setTab] = useState<AdminTab>("overview");
   const [userSearch, setUserSearch] = useState("");
+  const [sessions, setSessions] = useState<AuthSession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsError, setSessionsError] = useState("");
+  const [sessionBusyId, setSessionBusyId] = useState("");
+  const [logoutAllBusy, setLogoutAllBusy] = useState(false);
+  const [sessionFilter, setSessionFilter] = useState<SessionFilter>("active");
+  const [sessionCurrentFirst, setSessionCurrentFirst] = useState(true);
+  const [sessionPage, setSessionPage] = useState(1);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const sessionsPerPage = 6;
 
   const pendingPrayers = prayers.filter((p) => !p.approved);
   const approvedPrayers = prayers.filter((p) => p.approved);
@@ -1321,12 +1339,135 @@ function AdminDashboard({
       u.email?.toLowerCase().includes(userSearch.toLowerCase())
   );
 
+  const loadSessions = async () => {
+    setSessionsLoading(true);
+    setSessionsError("");
+    try {
+      const response = await api.getSessions();
+      setSessions(Array.isArray(response.sessions) ? response.sessions : []);
+    } catch (error) {
+      setSessionsError(error instanceof Error ? error.message : "Unable to load sessions.");
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab !== "sessions") return;
+    loadSessions().catch(() => {});
+  }, [tab]);
+
+  const filteredSessions = sessions.filter((session) => {
+    if (sessionFilter === "active" && session.revokedAt) return false;
+    if (sessionFilter === "revoked" && !session.revokedAt) return false;
+
+    const query = sessionSearch.trim().toLowerCase();
+    if (!query) return true;
+
+    const id = session.id.toLowerCase();
+    const ip = (session.ipAddress || "").toLowerCase();
+    const userAgent = (session.userAgent || "").toLowerCase();
+    return id.includes(query) || ip.includes(query) || userAgent.includes(query);
+  });
+
+  const sortedSessions = [...filteredSessions].sort((a, b) => {
+    if (sessionCurrentFirst) {
+      if (a.current && !b.current) return -1;
+      if (!a.current && b.current) return 1;
+    }
+    const aLastUsed = new Date(a.lastUsedAt).getTime();
+    const bLastUsed = new Date(b.lastUsedAt).getTime();
+    return bLastUsed - aLastUsed;
+  });
+
+  const totalSessionPages = Math.max(1, Math.ceil(sortedSessions.length / sessionsPerPage));
+  const paginatedSessions = sortedSessions.slice((sessionPage - 1) * sessionsPerPage, sessionPage * sessionsPerPage);
+
+  useEffect(() => {
+    setSessionPage(1);
+  }, [sessionFilter, sessionCurrentFirst, sessionSearch]);
+
+  useEffect(() => {
+    if (sessionPage > totalSessionPages) {
+      setSessionPage(totalSessionPages);
+    }
+  }, [sessionPage, totalSessionPages]);
+
+  const handleRevokeSession = async (id: string) => {
+    setSessionBusyId(id);
+    setSessionsError("");
+    try {
+      await api.revokeSession(id);
+      await loadSessions();
+    } catch (error) {
+      setSessionsError(error instanceof Error ? error.message : "Unable to revoke session.");
+    } finally {
+      setSessionBusyId("");
+    }
+  };
+
+  const handleLogoutOthers = async () => {
+    setLogoutAllBusy(true);
+    setSessionsError("");
+    try {
+      await api.logoutAll(false);
+      await loadSessions();
+    } catch (error) {
+      setSessionsError(error instanceof Error ? error.message : "Unable to revoke other sessions.");
+    } finally {
+      setLogoutAllBusy(false);
+    }
+  };
+
+  const handleLogoutAll = async () => {
+    setLogoutAllBusy(true);
+    setSessionsError("");
+    try {
+      await api.logoutAll(true);
+    } catch {
+      // logoutAll(true) already clears local tokens
+    } finally {
+      setLogoutAllBusy(false);
+      onLogout();
+    }
+  };
+
+  const formatSessionDate = (value: string) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleString();
+  };
+
+  const highlightSessionMatch = (value: string) => {
+    const query = sessionSearch.trim();
+    if (!query || !value) return value || "—";
+
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const parts = value.split(new RegExp(`(${escapedQuery})`, "ig"));
+
+    return (
+      <>
+        {parts.map((part, index) => {
+          if (part.toLowerCase() === query.toLowerCase()) {
+            return (
+              <mark key={`${part}-${index}`} className="bg-amber-200/80 text-[#1E2A4A] px-0.5 rounded-sm">
+                {part}
+              </mark>
+            );
+          }
+          return <span key={`${part}-${index}`}>{part}</span>;
+        })}
+      </>
+    );
+  };
+
   const tabs: { key: AdminTab; label: string; icon: typeof Send; badge?: number }[] = [
     { key: "overview",    label: "Overview",    icon: Home },
     { key: "pending",     label: "Pending",     icon: FileText,   badge: totalPending },
     { key: "approved",   label: "Approved",    icon: CheckCircle },
     { key: "testimonies",label: "Testimonies", icon: Sparkles },
     { key: "accounts",   label: "Accounts",    icon: Users,      badge: users.length },
+    { key: "sessions",   label: "Sessions",    icon: Smartphone },
     { key: "analytics",  label: "Analytics",   icon: TrendingUp },
   ];
 
@@ -1738,6 +1879,178 @@ function AdminDashboard({
             </motion.div>
           )}
 
+          {/* ── Sessions ── */}
+          {tab === "sessions" && (
+            <motion.div key="sessions" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-[#1E2A4A]">Session Management</h2>
+                  <p className="text-[#7A85A3] text-sm mt-0.5">Review active devices and revoke compromised sessions.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => loadSessions().catch(() => {})}
+                    disabled={sessionsLoading || logoutAllBusy}
+                    className="h-9 px-3 rounded-lg bg-white border border-[#E5EAF7] text-xs font-semibold text-[#1E2A4A] disabled:opacity-50"
+                  >
+                    Refresh
+                  </button>
+                  <button
+                    onClick={handleLogoutOthers}
+                    disabled={sessionsLoading || logoutAllBusy}
+                    className="h-9 px-3 rounded-lg bg-amber-50 text-amber-700 text-xs font-semibold disabled:opacity-50"
+                  >
+                    Revoke Others
+                  </button>
+                  <button
+                    onClick={handleLogoutAll}
+                    disabled={sessionsLoading || logoutAllBusy}
+                    className="h-9 px-3 rounded-lg bg-red-50 text-red-600 text-xs font-semibold disabled:opacity-50"
+                  >
+                    Logout All
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] font-semibold text-[#7A85A3] uppercase tracking-wider flex items-center gap-1">
+                    <Filter size={12} /> Filter
+                  </span>
+                  {[
+                    { key: "active" as SessionFilter, label: "Active" },
+                    { key: "revoked" as SessionFilter, label: "Revoked" },
+                    { key: "all" as SessionFilter, label: "All" },
+                  ].map((f) => (
+                    <button
+                      key={f.key}
+                      onClick={() => setSessionFilter(f.key)}
+                      className={cn(
+                        "h-8 px-3 rounded-lg text-xs font-semibold border transition-colors",
+                        sessionFilter === f.key
+                          ? "bg-[#1E3A8A] border-[#1E3A8A] text-white"
+                          : "bg-white border-[#E5EAF7] text-[#1E2A4A]"
+                      )}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => setSessionCurrentFirst((value) => !value)}
+                  className={cn(
+                    "h-8 px-3 rounded-lg text-xs font-semibold border self-start sm:self-auto",
+                    sessionCurrentFirst
+                      ? "bg-[#EEF2FF] border-[#C9D6FF] text-[#1E3A8A]"
+                      : "bg-white border-[#E5EAF7] text-[#7A85A3]"
+                  )}
+                >
+                  {sessionCurrentFirst ? "Current First: On" : "Current First: Off"}
+                </button>
+              </div>
+
+              <div className="relative max-w-sm w-full">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9AA3BC]" />
+                <input
+                  type="text"
+                  placeholder="Search ID, IP, or user agent..."
+                  value={sessionSearch}
+                  onChange={(e) => setSessionSearch(e.target.value)}
+                  className="w-full h-9 pl-9 pr-3 rounded-xl bg-white border border-[#EEF2FF] text-sm text-[#1E2A4A] placeholder-[#9AA3BC] outline-none focus:ring-2 focus:ring-[#1E3A8A]/20"
+                />
+              </div>
+
+              <div className="text-xs text-[#7A85A3]">
+                Showing {sortedSessions.length === 0 ? 0 : (sessionPage - 1) * sessionsPerPage + 1}
+                -{Math.min(sessionPage * sessionsPerPage, sortedSessions.length)} of {sortedSessions.length} session{sortedSessions.length !== 1 ? "s" : ""}
+              </div>
+
+              {sessionsError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                  {sessionsError}
+                </div>
+              )}
+
+              {sessionsLoading ? (
+                <div className="text-center py-20 text-[#9AA3BC]">
+                  <Loader2 size={30} className="mx-auto mb-3 animate-spin" />
+                  <p className="text-sm">Loading sessions...</p>
+                </div>
+              ) : sortedSessions.length === 0 ? (
+                <div className="text-center py-20 text-[#9AA3BC]">
+                  <Smartphone size={36} className="mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">No sessions in this filter.</p>
+                </div>
+              ) : (
+                <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {paginatedSessions.map((session) => (
+                    <div key={session.id} className="bg-white rounded-2xl p-5" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.05)" }}>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-9 h-9 rounded-xl bg-[#EEF2FF] text-[#1E3A8A] flex items-center justify-center">
+                            <Smartphone size={16} />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-[#1E2A4A]">{session.current ? "Current Device" : "Device Session"}</p>
+                            <p className="text-[11px] text-[#7A85A3]">ID: {highlightSessionMatch(session.id)}</p>
+                          </div>
+                        </div>
+                        {session.current && (
+                          <span className="text-[10px] font-bold text-[#1E3A8A] bg-[#EEF2FF] px-2 py-1 rounded-full">Current</span>
+                        )}
+                      </div>
+
+                      <div className="space-y-1.5 text-xs text-[#7A85A3] mb-4">
+                        <p><span className="font-semibold">Created:</span> {formatSessionDate(session.createdAt)}</p>
+                        <p><span className="font-semibold">Last Used:</span> {formatSessionDate(session.lastUsedAt)}</p>
+                        <p><span className="font-semibold">Expires:</span> {formatSessionDate(session.expiresAt)}</p>
+                        <p><span className="font-semibold">IP:</span> {highlightSessionMatch(session.ipAddress || "—")}</p>
+                        <p className="line-clamp-2"><span className="font-semibold">Agent:</span> {highlightSessionMatch(session.userAgent || "—")}</p>
+                        {session.revokedAt && (
+                          <p className="text-red-500"><span className="font-semibold">Revoked:</span> {formatSessionDate(session.revokedAt)}</p>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={() => handleRevokeSession(session.id)}
+                        disabled={Boolean(session.revokedAt) || sessionBusyId === session.id}
+                        className="w-full h-8 rounded-lg bg-red-50 text-red-600 text-xs font-semibold disabled:opacity-50 flex items-center justify-center gap-1"
+                      >
+                        {sessionBusyId === session.id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+                        {session.revokedAt ? "Already Revoked" : "Revoke Session"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {totalSessionPages > 1 && (
+                  <div className="flex items-center justify-between pt-2">
+                    <button
+                      onClick={() => setSessionPage((page) => Math.max(1, page - 1))}
+                      disabled={sessionPage === 1}
+                      className="h-8 px-3 rounded-lg bg-white border border-[#E5EAF7] text-xs font-semibold text-[#1E2A4A] disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-xs font-semibold text-[#7A85A3]">
+                      Page {sessionPage} of {totalSessionPages}
+                    </span>
+                    <button
+                      onClick={() => setSessionPage((page) => Math.min(totalSessionPages, page + 1))}
+                      disabled={sessionPage === totalSessionPages}
+                      className="h-8 px-3 rounded-lg bg-white border border-[#E5EAF7] text-xs font-semibold text-[#1E2A4A] disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+                </>
+              )}
+            </motion.div>
+          )}
+
           {/* ── Analytics ── */}
           {tab === "analytics" && (
             <motion.div key="analytics" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -1869,6 +2182,17 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (api.getAuthToken()) {
+      api.getCurrentUser()
+        .then((result) => {
+          setCurrentUser(result.user);
+        })
+        .catch(() => {
+          api.clearAuthToken();
+          setCurrentUser(null);
+        });
+    }
+
     refreshState().catch(() => {
       setOffline(true);
       setApiNotice("No internet connection. Showing the last available local experience.");
@@ -1979,7 +2303,7 @@ export default function App() {
   const handleAuthSuccess = (user: AuthUser) => {
     setCurrentUser(user);
     setApiNotice("");
-    navigate("submit");
+    navigate(user.role === "admin" ? "admin-dashboard" : "submit");
   };
 
   const handleDeleteUser = async (id: number) => {
@@ -1992,17 +2316,14 @@ export default function App() {
     }
   };
 
-  const handleAdminLogin = () => {
-    setCurrentUser({ id: 0, name: "Prayerbox Admin", email: "prayerbox@gmail.com" });
-    setApiNotice("");
-    navigate("admin-dashboard");
-    refreshState().catch(() => {});
-  };
-
   const handleLogout = () => {
-    setCurrentUser(null);
-    setApiNotice("");
-    navigate("submit");
+    api.logout().catch(() => {
+      api.clearAuthToken();
+    }).finally(() => {
+      setCurrentUser(null);
+      setApiNotice("");
+      navigate("submit");
+    });
   };
 
   const navActive = (): string => {
@@ -2062,13 +2383,17 @@ export default function App() {
               onAuthenticated={handleAuthSuccess}
               onLogout={handleLogout}
               onBack={() => navigate("submit")}
-              onAdminLogin={handleAdminLogin}
             />
           )}
           {screen === "settings" && <SettingsScreen onBack={() => navigate("submit")} onLogout={handleLogout} />}
           {screen === "admin-login" && (
             <AdminLoginScreen
-              onLogin={() => navigate("admin-dashboard")}
+              onLogin={(user) => {
+                setCurrentUser(user);
+                setApiNotice("");
+                navigate("admin-dashboard");
+                refreshState().catch(() => {});
+              }}
               onBack={() => navigate("submit")}
             />
           )}

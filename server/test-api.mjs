@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { copyFile, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,9 +7,12 @@ import { spawn } from "node:child_process";
 import { setTimeout } from "node:timers/promises";
 
 const TEST_PORT = Number(process.env.TEST_PORT || 4001);
-const dataFile = join(tmpdir(), `ay-prayerbox-test-${Date.now()}.json`);
+const dbFile = join(tmpdir(), `ay-prayerbox-test-${Date.now()}.sqlite`);
 const serverPath = fileURLToPath(new URL("./index.mjs", import.meta.url));
 const dataSource = join(fileURLToPath(new URL("./data.json", import.meta.url)));
+const testEmail = `test-${Date.now()}@example.com`;
+let authToken = "";
+let refreshToken = "";
 let serverProcess;
 
 function log(...args) {
@@ -17,23 +20,22 @@ function log(...args) {
 }
 
 async function startServer() {
-  await copyFile(dataSource, dataFile);
-
   serverProcess = spawn(
     process.execPath,
     [serverPath],
     {
-      env: { ...process.env, PORT: String(TEST_PORT), DATA_FILE: dataFile },
-      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        PORT: String(TEST_PORT),
+        DB_FILE: dbFile,
+        DATA_FILE: dataSource,
+        ADMIN_EMAILS: testEmail,
+        SESSION_SECRET: "test-session-secret",
+      },
+      stdio: "inherit",
     }
   );
-
-  serverProcess.stdout.on("data", (chunk) => {
-    process.stdout.write(chunk);
-  });
-  serverProcess.stderr.on("data", (chunk) => {
-    process.stderr.write(chunk);
-  });
 
   for (let attempt = 0; attempt < 25; attempt += 1) {
     try {
@@ -49,12 +51,33 @@ async function startServer() {
 }
 
 async function stopServer() {
-  if (serverProcess && !serverProcess.killed) {
-    serverProcess.kill();
-    await setTimeout(200);
+  if (serverProcess && serverProcess.exitCode === null && !serverProcess.killed) {
+    try {
+      await request("/api/__test/shutdown", { method: "POST" });
+      await Promise.race([
+        new Promise((resolve) => {
+          serverProcess.once("close", () => resolve());
+        }),
+        setTimeout(1500),
+      ]);
+    } catch {
+      // fallback to process signal if endpoint is unavailable
+    }
+
+    if (serverProcess.exitCode === null && !serverProcess.killed) {
+      serverProcess.kill("SIGTERM");
+      await Promise.race([
+        new Promise((resolve) => {
+          serverProcess.once("close", () => resolve());
+        }),
+        setTimeout(1500),
+      ]);
+    }
   }
   try {
-    await rm(dataFile);
+    await rm(dbFile, { force: true });
+    await rm(`${dbFile}-wal`, { force: true });
+    await rm(`${dbFile}-shm`, { force: true });
   } catch {
     // ignore cleanup errors
   }
@@ -62,7 +85,11 @@ async function stopServer() {
 
 async function request(path, options = {}) {
   const url = `http://localhost:${TEST_PORT}${path}`;
-  const response = await fetch(url, options);
+  const headers = { ...(options.headers || {}) };
+  if (authToken && !headers.Authorization) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+  const response = await fetch(url, { ...options, headers });
   const body = await response.text();
   let json;
   try {
@@ -91,20 +118,124 @@ async function runTests() {
   const registerResponse = await request("/api/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "Test User", email: "test@example.com", password: "secret123" }),
+    body: JSON.stringify({ name: "Test User", email: testEmail, password: "secret123" }),
   });
   assert.strictEqual(registerResponse.response.status, 201, "Expected POST /api/auth/register to return 201");
-  assert.strictEqual(registerResponse.json.user.email, "test@example.com");
+  assert.strictEqual(registerResponse.json.user.email, testEmail);
+  assert.ok(registerResponse.json.token, "Expected register response token");
+  assert.ok(registerResponse.json.refreshToken, "Expected register response refreshToken");
+  authToken = registerResponse.json.token;
+  refreshToken = registerResponse.json.refreshToken;
   log("POST /api/auth/register OK");
 
   const loginResponse = await request("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: "test@example.com", password: "secret123" }),
+    body: JSON.stringify({ email: testEmail, password: "secret123" }),
   });
   assert.strictEqual(loginResponse.response.status, 200, "Expected POST /api/auth/login to return 200");
-  assert.strictEqual(loginResponse.json.user.email, "test@example.com");
+  assert.strictEqual(loginResponse.json.user.email, testEmail);
+  assert.strictEqual(loginResponse.json.user.role, "admin", "Expected admin role from ADMIN_EMAILS");
+  assert.ok(loginResponse.json.token, "Expected login response token");
+  assert.ok(loginResponse.json.refreshToken, "Expected login response refreshToken");
+  authToken = loginResponse.json.token;
+  refreshToken = loginResponse.json.refreshToken;
   log("POST /api/auth/login OK");
+
+  const refreshResponse = await request("/api/auth/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken }),
+  });
+  assert.strictEqual(refreshResponse.response.status, 200, "Expected POST /api/auth/refresh to return 200");
+  assert.ok(refreshResponse.json.token, "Expected refreshed access token");
+  assert.ok(refreshResponse.json.refreshToken, "Expected refreshed refresh token");
+  authToken = refreshResponse.json.token;
+  refreshToken = refreshResponse.json.refreshToken;
+  log("POST /api/auth/refresh OK");
+
+  const meResponse = await request("/api/auth/me");
+  assert.strictEqual(meResponse.response.status, 200, "Expected GET /api/auth/me to return 200");
+  assert.strictEqual(meResponse.json.user.email, testEmail);
+  log("GET /api/auth/me OK");
+
+  const logoutResponse = await request("/api/auth/logout", { method: "POST" });
+  assert.strictEqual(logoutResponse.response.status, 200, "Expected POST /api/auth/logout to return 200");
+  log("POST /api/auth/logout OK");
+
+  const postLogoutMeResponse = await request("/api/auth/me");
+  assert.strictEqual(postLogoutMeResponse.response.status, 401, "Expected GET /api/auth/me to return 401 after logout");
+  log("GET /api/auth/me (post-logout) OK");
+
+  const reloginResponse = await request("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: testEmail, password: "secret123" }),
+  });
+  assert.strictEqual(reloginResponse.response.status, 200, "Expected re-login to return 200");
+  authToken = reloginResponse.json.token;
+  refreshToken = reloginResponse.json.refreshToken;
+  log("POST /api/auth/login (relogin) OK");
+
+  const secondSessionLogin = await request("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: testEmail, password: "secret123" }),
+  });
+  assert.strictEqual(secondSessionLogin.response.status, 200, "Expected second session login to return 200");
+  authToken = secondSessionLogin.json.token;
+  refreshToken = secondSessionLogin.json.refreshToken;
+  log("POST /api/auth/login (second session) OK");
+
+  const sessionsResponse = await request("/api/auth/sessions");
+  assert.strictEqual(sessionsResponse.response.status, 200, "Expected GET /api/auth/sessions to return 200");
+  assert.ok(Array.isArray(sessionsResponse.json.sessions), "Expected sessions array");
+  assert.ok(sessionsResponse.json.sessions.length >= 2, "Expected at least two sessions");
+  const currentSessions = sessionsResponse.json.sessions.filter((session) => session.current);
+  assert.strictEqual(currentSessions.length, 1, "Expected exactly one current session");
+  const nonCurrentSession = sessionsResponse.json.sessions.find((session) => !session.current);
+  assert.ok(nonCurrentSession, "Expected a non-current session");
+  log("GET /api/auth/sessions OK");
+
+  const revokeSessionResponse = await request(`/api/auth/sessions/${nonCurrentSession.id}`, { method: "DELETE" });
+  assert.strictEqual(revokeSessionResponse.response.status, 200, "Expected DELETE /api/auth/sessions/:id to return 200");
+  log("DELETE /api/auth/sessions/:id OK");
+
+  const sessionsAfterRevoke = await request("/api/auth/sessions");
+  assert.strictEqual(sessionsAfterRevoke.response.status, 200, "Expected GET /api/auth/sessions after revoke to return 200");
+  const revokedSession = sessionsAfterRevoke.json.sessions.find((session) => session.id === nonCurrentSession.id);
+  assert.ok(revokedSession && revokedSession.revokedAt, "Expected revoked session to have revokedAt");
+  log("GET /api/auth/sessions (after revoke) OK");
+
+  const logoutAllExceptCurrent = await request("/api/auth/logout-all", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ includeCurrent: false }),
+  });
+  assert.strictEqual(logoutAllExceptCurrent.response.status, 200, "Expected POST /api/auth/logout-all includeCurrent=false to return 200");
+  const meAfterLogoutOthers = await request("/api/auth/me");
+  assert.strictEqual(meAfterLogoutOthers.response.status, 200, "Expected current session to remain valid after includeCurrent=false");
+  log("POST /api/auth/logout-all (exclude current) OK");
+
+  const logoutAllIncludingCurrent = await request("/api/auth/logout-all", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ includeCurrent: true }),
+  });
+  assert.strictEqual(logoutAllIncludingCurrent.response.status, 200, "Expected POST /api/auth/logout-all includeCurrent=true to return 200");
+  const meAfterLogoutAll = await request("/api/auth/me");
+  assert.strictEqual(meAfterLogoutAll.response.status, 401, "Expected current session to be revoked after includeCurrent=true");
+  log("POST /api/auth/logout-all (include current) OK");
+
+  const reloginAfterLogoutAll = await request("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: testEmail, password: "secret123" }),
+  });
+  assert.strictEqual(reloginAfterLogoutAll.response.status, 200, "Expected login after logout-all to return 200");
+  authToken = reloginAfterLogoutAll.json.token;
+  refreshToken = reloginAfterLogoutAll.json.refreshToken;
+  log("POST /api/auth/login (after logout-all) OK");
 
   const prayers = await request("/api/prayers");
   assert.strictEqual(prayers.response.status, 200, "Expected /api/prayers to return 200");
@@ -177,12 +308,18 @@ async function runTests() {
   assert.strictEqual(deleteTestimony.json.ok, true);
   log("DELETE /api/testimonies/:id OK");
 
+  const auditResponse = await request("/api/admin/audit-logs?limit=10");
+  assert.strictEqual(auditResponse.response.status, 200, "Expected GET /api/admin/audit-logs to return 200");
+  assert.ok(Array.isArray(auditResponse.json), "Expected audit logs array");
+  assert.ok(auditResponse.json.length > 0, "Expected at least one audit log entry");
+  log("GET /api/admin/audit-logs OK");
+
   log("All backend API tests passed.");
 }
 
 try {
   await runTests();
-  process.exit(0);
+  process.exitCode = 0;
 } catch (error) {
   console.error("Test failed:", error);
   process.exitCode = 1;

@@ -1,2 +1,6 @@
 node_modules
 dist/ 
+server/*.sqlite
+server/*.sqlite-wal
+server/*.sqlite-shm
+server/backups/
