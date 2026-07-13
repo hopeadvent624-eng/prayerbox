@@ -30,6 +30,9 @@ export interface AuthUser {
   id: number;
   name: string;
   email: string;
+  phone?: string;
+  avatar?: string;
+  createdAt?: string;
 }
 
 const CONFIGURED_API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "";
@@ -99,16 +102,19 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   getState: () => request<PrayerboxState>("/api/state"),
-  register: (name: string, email: string, password: string) =>
-    request<{ user: AuthUser }> ("/api/auth/register", {
+  getUsers: () => request<AuthUser[]>("/api/users"),
+  register: (name: string, email: string, password: string, phone: string, avatar: string) =>
+    request<{ user: AuthUser }>("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, phone, avatar }),
     }),
   login: (email: string, password: string) =>
-    request<{ user: AuthUser }> ("/api/auth/login", {
+    request<{ user: AuthUser }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+  deleteUser: (id: number) =>
+    request<{ ok: boolean }>(`/api/users/${id}`, { method: "DELETE" }),
   submitPrayer: (name: string, prayerRequest: string, category: Category) =>
     request<PrayerRequest>("/api/prayers", {
       method: "POST",

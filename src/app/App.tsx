@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Settings, WifiOff, Loader2, Smartphone, Phone, Sparkles as SparklesIcon } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Home,
@@ -6,6 +7,7 @@ import {
   Plus,
   Sparkles,
   ChevronRight,
+  Share2,
   Lock,
   Check,
   X,
@@ -37,11 +39,14 @@ import prayingHandsLogo from "../imports/Asset_1.png";
 
 type Screen =
   | "splash"
+  | "onboarding"
   | "submit"
   | "success"
+  | "share"
   | "pray"
   | "testimonies"
   | "account"
+  | "settings"
   | "admin-login"
   | "admin-dashboard";
 
@@ -237,6 +242,13 @@ function TopNav({ active, onNavigate, currentUser }: { active: string; onNavigat
             <Send size={13} /> Submit Prayer
           </PrimaryButton>
           <button
+            onClick={() => onNavigate("settings")}
+            className="flex items-center gap-1.5 text-[#7A85A3] hover:text-[#1E3A8A] text-xs font-medium transition-colors px-2 py-1.5"
+            aria-label="Open settings"
+          >
+            <Settings size={13} /> Settings
+          </button>
+          <button
             onClick={() => onNavigate("account")}
             className="flex items-center gap-1.5 text-[#7A85A3] hover:text-[#1E3A8A] text-xs font-medium transition-colors px-2 py-1.5"
           >
@@ -406,6 +418,88 @@ function SplashScreen({ onStart, onPray, prayers, testimonies }: {
 
 // ─── Screen 2: Submit Prayer ──────────────────────────────────────────────────
 
+function OnboardingScreen({ onCreateAccount, onLogin, onSkip }: { onCreateAccount: () => void; onLogin: () => void; onSkip: () => void }) {
+  return (
+    <div className="min-h-screen bg-[#F5F6FA] flex items-center justify-center px-6 py-16">
+      <div className="max-w-md w-full text-center">
+        <div className="w-24 h-24 rounded-3xl bg-[#EEF2FF] flex items-center justify-center mx-auto mb-6 p-3" style={{ boxShadow: "0 12px 32px rgba(30,58,138,0.18)" }}>
+          <ImageWithFallback src={prayingHandsLogo} alt="AY Prayerbox logo" className="w-full h-full object-contain" />
+        </div>
+        <h1 className="text-3xl font-bold text-[#1E2A4A] mb-2">Welcome to AY Prayerbox</h1>
+        <p className="text-[#7A85A3] mb-8">Create an account or sign in to keep using Prayerbox with your profile, prayer sharing, and saved preferences.</p>
+        <div className="space-y-3">
+          <PrimaryButton onClick={onCreateAccount} className="w-full h-12 gap-2">
+            <User size={15} /> Create Account
+          </PrimaryButton>
+          <OutlineButton onClick={onLogin} className="w-full h-12 gap-2">
+            <Lock size={15} /> Login
+          </OutlineButton>
+          <button onClick={onSkip} className="text-sm text-[#9AA3BC] hover:text-[#1E3A8A] transition-colors">Continue as guest</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SplashLoadingScreen({ onFinish }: { onFinish: () => void }) {
+  useEffect(() => {
+    const timer = window.setTimeout(onFinish, 1400);
+    return () => window.clearTimeout(timer);
+  }, [onFinish]);
+
+  return (
+    <div className="min-h-screen bg-[#F5F6FA] flex items-center justify-center px-6">
+      <div className="max-w-sm w-full text-center">
+        <div className="w-24 h-24 rounded-3xl bg-[#EEF2FF] flex items-center justify-center mx-auto mb-6 p-3" style={{ boxShadow: "0 12px 32px rgba(30,58,138,0.18)" }}>
+          <ImageWithFallback src={prayingHandsLogo} alt="AY Prayerbox logo" className="w-full h-full object-contain" />
+        </div>
+        <h1 className="text-3xl font-bold text-[#1E2A4A] mb-2">AY Prayerbox</h1>
+        <p className="text-[#7A85A3] mb-8">Preparing your prayer space...</p>
+        <div className="w-full h-2 rounded-full bg-[#EEF2FF] overflow-hidden">
+          <motion.div initial={{ width: 0 }} animate={{ width: "100%" }} transition={{ duration: 1.3, ease: "easeInOut" }} className="h-full rounded-full bg-[#1E3A8A]" />
+        </div>
+        <div className="flex items-center justify-center gap-2 mt-4 text-[#7A85A3] text-sm">
+          <Loader2 size={16} className="animate-spin" /> Loading your community
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OfflineNotice({ message }: { message: string }) {
+  return (
+    <div className="flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">
+      <WifiOff size={15} /> {message}
+    </div>
+  );
+}
+
+function SettingsScreen({ onBack, onLogout }: { onBack: () => void; onLogout: () => void }) {
+  return (
+    <div className="min-h-screen bg-[#F5F6FA] flex items-center justify-center px-6 py-16">
+      <div className="max-w-md w-full rounded-2xl bg-white p-7" style={{ boxShadow: "0 4px 24px rgba(30,58,138,0.08)" }}>
+        <div className="flex items-center gap-2 mb-6">
+          <Settings size={18} className="text-[#1E3A8A]" />
+          <h2 className="text-xl font-bold text-[#1E2A4A]">Settings</h2>
+        </div>
+        <div className="space-y-3 text-sm text-[#2D3A5E]">
+          <div className="rounded-xl bg-[#F5F6FA] p-3">Stay signed in on this device so you can return without re-entering your details.</div>
+          <div className="rounded-xl bg-[#F5F6FA] p-3">If you lose internet, Prayerbox will show a clear offline message while keeping the local experience available.</div>
+          <div className="rounded-xl bg-[#F5F6FA] p-3">Admins can view the account owner and delete accounts from the Leader Panel.</div>
+        </div>
+        <div className="mt-6 space-y-3">
+          <OutlineButton onClick={onBack} className="w-full h-12 gap-2">
+            <ArrowLeft size={14} /> Back
+          </OutlineButton>
+          <PrimaryButton onClick={onLogout} className="w-full h-12 gap-2">
+            <LogOut size={14} /> Sign Out
+          </PrimaryButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SubmitScreen({ onSubmit, defaultName }: { onSubmit: (name: string, request: string, category: Category) => void; defaultName?: string }) {
   const [name, setName] = useState(defaultName ?? "");
   const [request, setRequest] = useState("");
@@ -416,13 +510,23 @@ function SubmitScreen({ onSubmit, defaultName }: { onSubmit: (name: string, requ
     setName(defaultName ?? "");
   }, [defaultName]);
 
-    function copyLink(): void {
-        throw new Error("Function not implemented.");
-    }
+  const getShareUrl = () => (typeof window !== "undefined" ? window.location.href : "https://ay-prayerbox.example");
 
-    function shareWhatsApp(): void {
-        throw new Error("Function not implemented.");
+  const copyLink = async () => {
+    const url = getShareUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+      alert("Link copied to clipboard!");
+    } catch {
+      prompt("Copy this link:", url);
     }
+  };
+
+  const shareWhatsApp = () => {
+    const url = getShareUrl();
+    const text = encodeURIComponent(`Check out AY Prayerbox:\n${url}`);
+    window.open(`https://wa.me/?text=${text}`, "_blank");
+  };
 
   return (
     <div className="min-h-screen bg-[#F5F6FA]">
@@ -546,6 +650,80 @@ function SuccessScreen({ onPray }: { onPray: () => void }) {
             </OutlineButton>
           </div>
         </motion.div>
+      </div>
+    </div>
+  );
+}
+
+function SharePrayerScreen({ prayer, onDone }: { prayer: { name: string; request: string; category: Category } | null; onDone: () => void }) {
+  const getShareUrl = () => (typeof window !== "undefined" ? window.location.href : "https://ay-prayerbox.example");
+  const buildMessage = () => {
+    if (!prayer) return "A prayer request was shared through AY Prayerbox.";
+    return `Prayer request from ${prayer.name} (${prayer.category}): ${prayer.request}\n\nOpen AY Prayerbox to pray with them.`;
+  };
+
+  const handleShare = async () => {
+    const message = buildMessage();
+    const url = getShareUrl();
+
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({
+          title: "AY Prayerbox prayer request",
+          text: message,
+          url,
+        });
+        return;
+      } catch {
+        // fall back below
+      }
+    }
+
+    const text = encodeURIComponent(`${message}\n\n${url}`);
+    window.open(`https://wa.me/?text=${text}`, "_blank");
+  };
+
+  const copyLink = async () => {
+    const url = getShareUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+      alert("Prayer link copied to clipboard!");
+    } catch {
+      prompt("Copy this link:", url);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F5F6FA] flex items-center justify-center px-6 py-16">
+      <div className="max-w-md w-full rounded-3xl bg-white p-7" style={{ boxShadow: "0 8px 32px rgba(30,58,138,0.10)" }}>
+        <div className="text-center mb-6">
+          <div className="w-16 h-16 rounded-2xl bg-[#EEF2FF] flex items-center justify-center mx-auto mb-4">
+            <Share2 size={24} className="text-[#1E3A8A]" />
+          </div>
+          <h2 className="text-2xl font-bold text-[#1E2A4A]">Share this prayer</h2>
+          <p className="text-[#7A85A3] text-sm mt-2">Send it to your circle the same way you would share something personal and meaningful.</p>
+        </div>
+
+        <div className="rounded-2xl border border-[#EEF2FF] bg-[#F5F6FA] p-4 mb-5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-[#1E3A8A]">Prayer preview</span>
+            <span className="rounded-full bg-[#EEF2FF] px-2.5 py-1 text-[11px] font-semibold text-[#1E3A8A]">{prayer?.category || "Personal"}</span>
+          </div>
+          <p className="font-semibold text-[#1E2A4A] mb-2">{prayer?.name || "Your prayer"}</p>
+          <p className="text-sm text-[#2D3A5E] leading-relaxed">{prayer?.request || "Your prayer request is ready to be shared with others."}</p>
+        </div>
+
+        <div className="space-y-3">
+          <PrimaryButton onClick={handleShare} className="w-full h-12 gap-2">
+            <Share2 size={15} /> Share now
+          </PrimaryButton>
+          <OutlineButton onClick={copyLink} className="w-full h-12 gap-2">
+            <Copy size={14} /> Copy link
+          </OutlineButton>
+          <button onClick={onDone} className="w-full text-center text-[#9AA3BC] text-sm hover:text-[#7A85A3] transition-colors">
+            Back to home
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -861,6 +1039,8 @@ function AccountScreen({ currentUser, onAuthenticated, onLogout, onBack, onAdmin
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
+  const [avatar, setAvatar] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -876,7 +1056,7 @@ function AccountScreen({ currentUser, onAuthenticated, onLogout, onBack, onAdmin
     setLoading(true);
     try {
       const response = mode === "signup"
-        ? await api.register(name.trim(), normalizedEmail, password)
+        ? await api.register(name.trim(), normalizedEmail, password, phone.trim(), avatar)
         : await api.login(normalizedEmail, password);
       onAuthenticated(response.user);
     } catch (err) {
@@ -900,9 +1080,18 @@ function AccountScreen({ currentUser, onAuthenticated, onLogout, onBack, onAdmin
         <div className="bg-white rounded-2xl p-7 space-y-4" style={{ boxShadow: "0 4px 24px rgba(30,58,138,0.08)" }}>
           {currentUser ? (
             <div className="space-y-4">
-              <div className="rounded-xl bg-[#EEF2FF] p-4 text-center">
-                <p className="text-[#1E3A8A] font-semibold">Signed in as {currentUser.name}</p>
-                <p className="text-[#7A85A3] text-sm mt-1">{currentUser.email}</p>
+              <div className="rounded-xl bg-[#EEF2FF] p-4 flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-white">
+                  {currentUser.avatar ? (
+                    <img src={currentUser.avatar} alt={currentUser.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <User size={18} className="text-[#1E3A8A]" />
+                  )}
+                </div>
+                <div>
+                  <p className="text-[#1E3A8A] font-semibold">{currentUser.name}</p>
+                  <p className="text-[#7A85A3] text-sm">Ready to pray and share</p>
+                </div>
               </div>
               <PrimaryButton onClick={onLogout} className="w-full h-12 gap-2">
                 <LogOut size={14} /> Sign Out
@@ -920,10 +1109,30 @@ function AccountScreen({ currentUser, onAuthenticated, onLogout, onBack, onAdmin
               </div>
 
               {mode === "signup" && (
-                <div>
-                  <label className="block text-sm font-semibold text-[#1E2A4A] mb-2">Full Name</label>
-                  <TextInput placeholder="e.g. Tinashe" value={name} onChange={setName} maxLength={30} />
-                </div>
+                <>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#1E2A4A] mb-2">Full Name</label>
+                    <TextInput placeholder="e.g. Tinashe" value={name} onChange={setName} maxLength={30} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#1E2A4A] mb-2">Phone Number</label>
+                    <TextInput placeholder="e.g. +263 77 123 4567" value={phone} onChange={setPhone} maxLength={20} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#1E2A4A] mb-2">Profile Photo</label>
+                    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[#C7D2FE] bg-[#F5F6FA] px-4 py-3 text-sm font-medium text-[#1E3A8A] transition hover:bg-[#EEF2FF]">
+                      <User size={16} />
+                      {avatar ? "Change photo" : "Upload an image"}
+                      <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+                    </label>
+                    {avatar && (
+                      <div className="mt-3 flex items-center gap-3 rounded-xl bg-[#EEF2FF] p-3">
+                        <img src={avatar} alt="Profile preview" className="h-12 w-12 rounded-full object-cover" />
+                        <p className="text-sm text-[#1E2A4A]">Photo ready to use</p>
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
 
               <div>
@@ -1007,7 +1216,7 @@ type AdminTab = "pending" | "approved" | "testimonies" | "analytics";
 
 function AdminDashboard({
   prayers, testimonies, users, onApprovePrayer, onRejectPrayer, onToggleUrgent,
-  onApproveTestimony, onRejectTestimony, onLogout,
+  onApproveTestimony, onRejectTestimony, onDeleteUser, onLogout,
 }: {
   prayers: PrayerRequest[];
   testimonies: Testimony[];
@@ -1017,6 +1226,7 @@ function AdminDashboard({
   onToggleUrgent: (id: number) => void;
   onApproveTestimony: (id: number) => void;
   onRejectTestimony: (id: number) => void;
+  onDeleteUser: (id: number) => void;
   onLogout: () => void;
 }) {
   const [tab, setTab] = useState<AdminTab>("pending");
@@ -1263,13 +1473,19 @@ function AdminDashboard({
                       {users.map((user) => (
                         <div key={user.id} className="border border-[#EEF2FF] rounded-xl p-3">
                           <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-full bg-[#EEF2FF] flex items-center justify-center text-sm font-bold text-[#1E3A8A]">
-                              {user.name?.[0] || "U"}
+                            <div className="w-9 h-9 rounded-full bg-[#EEF2FF] flex items-center justify-center text-sm font-bold text-[#1E3A8A] overflow-hidden">
+                              {user.avatar ? (
+                                <img src={user.avatar} alt={user.name} className="h-full w-full object-cover" />
+                              ) : (
+                                user.name?.[0] || "U"
+                              )}
                             </div>
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <p className="font-semibold text-[#1E2A4A] text-sm truncate">{user.name}</p>
                               <p className="text-xs text-[#7A85A3] truncate">{user.email}</p>
+                              <p className="text-[11px] text-[#9AA3BC] mt-1">Owner: {user.name} · {user.phone || "No phone added"}</p>
                             </div>
+                            <button onClick={() => onDeleteUser(user.id)} className="text-xs font-semibold text-red-500">Delete</button>
                           </div>
                         </div>
                       ))}
@@ -1291,6 +1507,7 @@ function AdminDashboard({
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("splash");
+  const [showSplash, setShowSplash] = useState(true);
   const [prayers, setPrayers] = useState<PrayerRequest[]>(INITIAL_PRAYERS);
   const [testimonies, setTestimonies] = useState<Testimony[]>(INITIAL_TESTIMONIES);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
@@ -1303,6 +1520,8 @@ export default function App() {
   });
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [apiNotice, setApiNotice] = useState("");
+  const [offline, setOffline] = useState(false);
+  const [sharedPrayer, setSharedPrayer] = useState<{ name: string; request: string; category: Category } | null>(null);
 
   const navigate = (s: Screen) => setScreen(s);
 
@@ -1312,11 +1531,13 @@ export default function App() {
     setTestimonies(state.testimonies);
     setUsers(Array.isArray(state.users) ? state.users : []);
     setApiNotice("");
+    setOffline(false);
   };
 
   useEffect(() => {
     refreshState().catch(() => {
-      setApiNotice("Backend offline - showing local demo data.");
+      setOffline(true);
+      setApiNotice("No internet connection. Showing the last available local experience.");
     });
   }, []);
 
@@ -1333,6 +1554,7 @@ export default function App() {
   }, [currentUser]);
 
   const handleSubmitPrayer = async (name: string, request: string, category: Category) => {
+    setSharedPrayer({ name, request, category });
     try {
       await api.submitPrayer(name, request, category);
       await refreshState();
@@ -1340,7 +1562,7 @@ export default function App() {
       setPrayers((prev) => [...prev, { id: Date.now(), name, request, category, prayerCount: 0, approved: true }]);
       setApiNotice("Backend offline - saved only in this browser session.");
     }
-    navigate("success");
+    navigate("share");
   };
 
   const handlePrayed = async (id: number) => {
@@ -1417,6 +1639,16 @@ export default function App() {
     navigate("submit");
   };
 
+  const handleDeleteUser = async (id: number) => {
+    try {
+      await api.deleteUser(id);
+      await refreshState();
+    } catch {
+      setUsers((prev) => prev.filter((user) => user.id !== id));
+      setApiNotice("Account removed from this device.");
+    }
+  };
+
   const handleAdminLogin = () => {
     setCurrentUser({ id: 0, name: "Prayerbox Admin", email: "prayerbox@gmail.com" });
     setApiNotice("");
@@ -1436,13 +1668,19 @@ export default function App() {
     return "";
   };
 
-  const showNav = !["splash", "admin-login", "admin-dashboard", "account"].includes(screen);
+  const showNav = !["splash", "onboarding", "admin-login", "admin-dashboard", "account", "settings", "share"].includes(screen);
 
   return (
     <div className="min-h-screen bg-background font-['Inter',sans-serif]">
       {apiNotice && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-xs font-semibold text-amber-800">
           {apiNotice}
+        </div>
+      )}
+
+      {offline && (
+        <div className="bg-[#FFF7ED] border-b border-orange-200 px-4 py-2 text-center text-xs font-semibold text-orange-700 flex items-center justify-center gap-2">
+          <WifiOff size={14} /> No internet connection. Prayerbox is running in offline mode.
         </div>
       )}
 
@@ -1472,9 +1710,11 @@ export default function App() {
           exit={{ opacity: 0, y: -12 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
         >
-          {screen === "splash" && <SplashScreen onStart={() => navigate("submit")} onPray={() => navigate("pray")} prayers={prayers} testimonies={testimonies} />}
+          {screen === "splash" && (showSplash ? <SplashLoadingScreen onFinish={() => { setShowSplash(false); navigate(currentUser ? "submit" : "onboarding"); }} /> : <SplashScreen onStart={() => navigate("submit")} onPray={() => navigate("pray")} prayers={prayers} testimonies={testimonies} />)}
+          {screen === "onboarding" && <OnboardingScreen onCreateAccount={() => navigate("account")} onLogin={() => navigate("account")} onSkip={() => navigate("submit")} />}
           {screen === "submit" && <SubmitScreen onSubmit={handleSubmitPrayer} defaultName={currentUser?.name?.split(" ")[0]} />}
           {screen === "success" && <SuccessScreen onPray={() => navigate("pray")} />}
+          {screen === "share" && <SharePrayerScreen prayer={sharedPrayer} onDone={() => navigate("submit")} />}
           {screen === "pray" && (
             <PrayScreen
               prayers={prayers}
@@ -1496,6 +1736,7 @@ export default function App() {
               onAdminLogin={handleAdminLogin}
             />
           )}
+          {screen === "settings" && <SettingsScreen onBack={() => navigate("submit")} onLogout={handleLogout} />}
           {screen === "admin-login" && (
             <AdminLoginScreen
               onLogin={() => navigate("admin-dashboard")}
@@ -1512,6 +1753,7 @@ export default function App() {
               onToggleUrgent={(id) => updatePrayer(id, { urgent: !prayers.find((p) => p.id === id)?.urgent })}
               onApproveTestimony={(id) => updateTestimony(id, { approved: true })}
               onRejectTestimony={deleteTestimony}
+              onDeleteUser={handleDeleteUser}
               onLogout={() => navigate("submit")}
             />
           )}

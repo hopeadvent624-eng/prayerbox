@@ -39,7 +39,15 @@ async function readData() {
   try {
     const existing = JSON.parse(await readFile(dataFile, "utf8"));
     const normalized = {
-      users: Array.isArray(existing.users) ? existing.users : [],
+      users: Array.isArray(existing.users) ? existing.users.map((user) => ({
+        id: Number(user.id || nextId([])),
+        name: sanitizeText(user.name, 30),
+        email: sanitizeText(user.email, 120).toLowerCase(),
+        phone: sanitizeText(user.phone, 20),
+        avatar: String(user.avatar || "").trim().slice(0, 5_000_000),
+        password: String(user.password || ""),
+        createdAt: user.createdAt || new Date().toISOString(),
+      })) : [],
       prayers: Array.isArray(existing.prayers) ? existing.prayers : initialData.prayers,
       testimonies: Array.isArray(existing.testimonies) ? existing.testimonies : initialData.testimonies,
     };
@@ -198,7 +206,23 @@ function nextId(items) {
                                                                                                                                                                                                                                                                                                                                           return;
                                                                                                                                                                                                                                                                                                                                             }
 
-                                                                                                                                                                                                                                                                                                                                              const prayerMatch = path.match(/^\/api\/prayers\/(\d+)(\/pray)?$/);
+                                                                                                                                                                                                                                                                                                                                              const userMatch = path.match(/^\/api\/users\/(\d+)$/);
+if (userMatch) {
+  const id = Number(userMatch[1]);
+  const user = data.users.find((item) => item.id === id);
+  if (!user) {
+    sendJson(res, 404, { error: "User not found" });
+    return;
+  }
+  if (method === "DELETE") {
+    data.users = data.users.filter((item) => item.id !== id);
+    await writeData(data);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+}
+
+const prayerMatch = path.match(/^\/api\/prayers\/(\d+)(\/pray)?$/);
                                                                                                                                                                                                                                                                                                                                                 if (prayerMatch) {
                                                                                                                                                                                                                                                                                                                                                     const id = Number(prayerMatch[1]);
                                                                                                                                                                                                                                                                                                                                                         const prayer = data.prayers.find((item) => item.id === id);
