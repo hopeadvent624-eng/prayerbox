@@ -1028,14 +1028,15 @@ function TestimoniesScreen({ testimonies, onSubmit }: {
 
 // ─── Account / Auth ────────────────────────────────────────────────────────
 
-function AccountScreen({ currentUser, onAuthenticated, onLogout, onBack, onAdminLogin }: {
+function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, onLogout, onBack, onAdminLogin }: {
   currentUser: AuthUser | null;
+  initialMode?: "signin" | "signup";
   onAuthenticated: (user: AuthUser) => void;
   onLogout: () => void;
   onBack: () => void;
   onAdminLogin: () => void;
 }) {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -1044,6 +1045,27 @@ function AccountScreen({ currentUser, onAuthenticated, onLogout, onBack, onAdmin
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("Please choose an image file.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      setAvatar(result);
+      setError("");
+    };
+    reader.onerror = () => {
+      setError("The photo could not be read. Please try another image.");
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSubmit = async () => {
     setError("");
     const normalizedEmail = email.trim().toLowerCase();
@@ -1051,6 +1073,21 @@ function AccountScreen({ currentUser, onAuthenticated, onLogout, onBack, onAdmin
     if (mode === "signin" && normalizedEmail === "prayerbox@gmail.com" && password === "admin123") {
       onAdminLogin();
       return;
+    }
+
+    if (mode === "signup") {
+      if (!name.trim()) {
+        setError("Please enter your full name.");
+        return;
+      }
+      if (!normalizedEmail) {
+        setError("Please enter your email address.");
+        return;
+      }
+      if (!password.trim()) {
+        setError("Please enter a password.");
+        return;
+      }
     }
 
     setLoading(true);
@@ -1100,11 +1137,10 @@ function AccountScreen({ currentUser, onAuthenticated, onLogout, onBack, onAdmin
           ) : (
             <>
               <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#F5F6FA] p-1">
-                <button onClick={() => setMode("signin")} className={cn("h-10 rounded-lg text-sm font-semibold transition-colors", mode === "signin" ? "bg-white text-[#1E3A8A] shadow-sm" : "text-[#7A85A3]")}>
+                <button onClick={() => { setMode("signin"); setError(""); }} className={cn("h-10 rounded-lg text-sm font-semibold transition-colors", mode === "signin" ? "bg-white text-[#1E3A8A] shadow-sm" : "text-[#7A85A3]")}> 
                   Sign In
                 </button>
-                <button onClick={() => setMode("signup")} className={cn("h-10 rounded-lg text-sm font-semibold transition-colors", mode === "signup" ? "bg-white text-[#1E3A8A] shadow-sm" : "text-[#7A85A3]")}>
-                  Create Account
+                <button onClick={() => { setMode("signup"); setError(""); }} className={cn("h-10 rounded-lg text-sm font-semibold transition-colors", mode === "signup" ? "bg-white text-[#1E3A8A] shadow-sm" : "text-[#7A85A3]")}> 
                 </button>
               </div>
 
@@ -1522,8 +1558,13 @@ export default function App() {
   const [apiNotice, setApiNotice] = useState("");
   const [offline, setOffline] = useState(false);
   const [sharedPrayer, setSharedPrayer] = useState<{ name: string; request: string; category: Category } | null>(null);
+  const [accountMode, setAccountMode] = useState<"signin" | "signup">("signin");
 
   const navigate = (s: Screen) => setScreen(s);
+  const openAccount = (mode: "signin" | "signup") => {
+    setAccountMode(mode);
+    navigate("account");
+  };
 
   const refreshState = async () => {
     const state = await api.getState();
@@ -1711,7 +1752,7 @@ export default function App() {
           transition={{ duration: 0.2, ease: "easeOut" }}
         >
           {screen === "splash" && (showSplash ? <SplashLoadingScreen onFinish={() => { setShowSplash(false); navigate(currentUser ? "submit" : "onboarding"); }} /> : <SplashScreen onStart={() => navigate("submit")} onPray={() => navigate("pray")} prayers={prayers} testimonies={testimonies} />)}
-          {screen === "onboarding" && <OnboardingScreen onCreateAccount={() => navigate("account")} onLogin={() => navigate("account")} onSkip={() => navigate("submit")} />}
+          {screen === "onboarding" && <OnboardingScreen onCreateAccount={() => openAccount("signup")} onLogin={() => openAccount("signin")} onSkip={() => navigate("submit")} />}
           {screen === "submit" && <SubmitScreen onSubmit={handleSubmitPrayer} defaultName={currentUser?.name?.split(" ")[0]} />}
           {screen === "success" && <SuccessScreen onPray={() => navigate("pray")} />}
           {screen === "share" && <SharePrayerScreen prayer={sharedPrayer} onDone={() => navigate("submit")} />}
@@ -1730,6 +1771,7 @@ export default function App() {
           {screen === "account" && (
             <AccountScreen
               currentUser={currentUser}
+              initialMode={accountMode}
               onAuthenticated={handleAuthSuccess}
               onLogout={handleLogout}
               onBack={() => navigate("submit")}
