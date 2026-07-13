@@ -58,6 +58,7 @@ const SCRYPT_P = 1;
 const SCRYPT_KEYLEN = 64;
 const TOKEN_KIND_ACCESS = "access";
 const TOKEN_KIND_REFRESH = "refresh";
+const ACCOUNT_ACTION_TOKEN_TTL_MINUTES = Number(process.env.ACCOUNT_ACTION_TOKEN_TTL_MINUTES || 15);
 
 function base64UrlEncode(value) {
   return Buffer.from(value)
@@ -192,12 +193,56 @@ function buildSafeUser(user) {
   return {
     id: user.id,
     name: user.name,
+    username: user.username || "",
     email: user.email,
     phone: user.phone || "",
     avatar: user.avatar || "",
+    bio: user.bio || "",
     role: user.role === "admin" ? "admin" : "user",
+    accountStatus: user.accountStatus || "active",
     createdAt: user.createdAt,
   };
+}
+
+function sanitizeUsername(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, "")
+    .slice(0, 40);
+}
+
+function createAccountActionToken(userId, action) {
+  const confirmationToken = randomBytes(24).toString("hex");
+  const tokenHash = hashToken(confirmationToken);
+  const expiresAt = new Date(Date.now() + ACCOUNT_ACTION_TOKEN_TTL_MINUTES * 60 * 1000).toISOString();
+  const createdAt = new Date().toISOString();
+
+  db.prepare(
+    `INSERT INTO account_action_tokens
+      (userId, action, tokenHash, expiresAt, usedAt, createdAt)
+      VALUES (?, ?, ?, ?, NULL, ?)`
+  ).run(Number(userId), String(action), tokenHash, expiresAt, createdAt);
+
+  return { confirmationToken, expiresAt };
+}
+
+function consumeAccountActionToken(userId, action, confirmationToken) {
+  const tokenHash = hashToken(String(confirmationToken || "").trim());
+  const row = db.prepare(
+    `SELECT id, userId, action, expiresAt, usedAt
+      FROM account_action_tokens
+      WHERE userId = ? AND action = ? AND tokenHash = ?
+      ORDER BY id DESC LIMIT 1`
+  ).get(Number(userId), String(action), tokenHash);
+
+  if (!row) return false;
+  if (row.usedAt) return false;
+  if (new Date(row.expiresAt).getTime() < Date.now()) return false;
+
+  db.prepare("UPDATE account_action_tokens SET usedAt = ? WHERE id = ?")
+    .run(new Date().toISOString(), Number(row.id));
+  return true;
 }
 
 function getSessionById(sessionId) {
@@ -268,10 +313,13 @@ function setupSchema() {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
+      username TEXT,
       email TEXT NOT NULL UNIQUE,
       phone TEXT,
       avatar TEXT,
+      bio TEXT,
       password TEXT NOT NULL,
+      accountStatus TEXT NOT NULL DEFAULT 'active',
       createdAt TEXT NOT NULL
     );
 
@@ -319,6 +367,17 @@ function setupSchema() {
       ipAddress TEXT,
       createdAt TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS account_action_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      tokenHash TEXT NOT NULL,
+      expiresAt TEXT NOT NULL,
+      usedAt TEXT,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY(userId) REFERENCES users(id)
+    );
   `);
 }
 
@@ -327,16 +386,41 @@ function ensureSchemaMigrations() {
   if (!columns.some((column) => column.name === "role")) {
     db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
   }
+  if (!columns.some((column) => column.name === "username")) {
+    db.exec("ALTER TABLE users ADD COLUMN username TEXT");
+  }
+  if (!columns.some((column) => column.name === "bio")) {
+    db.exec("ALTER TABLE users ADD COLUMN bio TEXT");
+  }
+  if (!columns.some((column) => column.name === "accountStatus")) {
+    db.exec("ALTER TABLE users ADD COLUMN accountStatus TEXT NOT NULL DEFAULT 'active'");
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS account_action_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      tokenHash TEXT NOT NULL,
+      expiresAt TEXT NOT NULL,
+      usedAt TEXT,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY(userId) REFERENCES users(id)
+    )
+  `);
 }
 
 function rowToUser(row) {
   return {
     id: row.id,
     name: row.name,
+    username: row.username || "",
     email: row.email,
     phone: row.phone || "",
     avatar: row.avatar || "",
+    bio: row.bio || "",
     role: row.role === "admin" ? "admin" : "user",
+    accountStatus: row.accountStatus || "active",
     createdAt: row.createdAt,
   };
 }
@@ -519,6 +603,11 @@ function syncAdminRoles() {
 
 function purgeExpiredSessions() {
   db.prepare("DELETE FROM auth_sessions WHERE expiresAt < ?").run(new Date().toISOString());
+}
+
+function purgeExpiredActionTokens() {
+  db.prepare("DELETE FROM account_action_tokens WHERE expiresAt < ? OR usedAt IS NOT NULL")
+    .run(new Date().toISOString());
 }
 
 function createSessionForUser(user, req) {
@@ -741,7 +830,7 @@ async function handleRequest(req, res) {
 
   if (method === "GET" && path === "/api/users") {
     requireAdmin(req);
-    sendJson(res, 200, db.prepare("SELECT id, name, email, phone, avatar, role, createdAt FROM users ORDER BY id").all().map(rowToUser));
+    sendJson(res, 200, db.prepare("SELECT * FROM users ORDER BY id").all().map(rowToUser));
     return;
   }
 
@@ -785,6 +874,8 @@ async function handleRequest(req, res) {
     const password = String(body.password || "").trim();
     const phone = sanitizeText(body.phone, 20);
     const avatar = String(body.avatar || "").trim().slice(0, 5_000_000);
+    const username = sanitizeUsername(body.username || name);
+    const bio = sanitizeText(body.bio, 280);
 
     if (!name || !email || !password) {
       sendJson(res, 400, { error: "Name, email, and password are required" });
@@ -800,17 +891,28 @@ async function handleRequest(req, res) {
     const createdAt = new Date().toISOString();
     const role = roleForEmail(email);
     const passwordHash = hashPassword(password);
+    if (username) {
+      const existingUsername = db.prepare("SELECT id FROM users WHERE lower(username) = ?").get(username);
+      if (existingUsername) {
+        sendJson(res, 409, { error: "Username is already in use" });
+        return;
+      }
+    }
+
     const result = db
-      .prepare("INSERT INTO users (name, email, phone, avatar, password, role, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(name, email, phone, avatar, passwordHash, role, createdAt);
+      .prepare("INSERT INTO users (name, username, email, phone, avatar, bio, password, role, accountStatus, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)")
+      .run(name, username, email, phone, avatar, bio, passwordHash, role, createdAt);
 
     const user = {
       id: Number(result.lastInsertRowid),
       name,
+      username,
       email,
       phone,
       avatar,
+      bio,
       role,
+      accountStatus: "active",
       createdAt,
     };
 
@@ -830,11 +932,16 @@ async function handleRequest(req, res) {
     const email = sanitizeText(body.email, 120).toLowerCase();
     const password = String(body.password || "").trim();
     const user = db
-      .prepare("SELECT id, name, email, phone, avatar, role, password, createdAt FROM users WHERE email = ?")
+      .prepare("SELECT id, name, username, email, phone, avatar, bio, role, accountStatus, password, createdAt FROM users WHERE email = ?")
       .get(email);
 
     if (!user || !verifyPassword(password, user.password)) {
       sendJson(res, 401, { error: "Invalid email or password" });
+      return;
+    }
+
+    if (user.accountStatus === "deactivated") {
+      sendJson(res, 403, { error: "Account is deactivated" });
       return;
     }
 
@@ -876,10 +983,16 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const user = db.prepare("SELECT id, name, email, phone, avatar, role, createdAt FROM users WHERE id = ?").get(Number(payload.sub));
+    const user = db.prepare("SELECT id, name, username, email, phone, avatar, bio, role, accountStatus, createdAt FROM users WHERE id = ?").get(Number(payload.sub));
     if (!user) {
       revokeSession(payload.sid);
       sendJson(res, 401, { error: "User no longer exists" });
+      return;
+    }
+
+    if (user.accountStatus === "deactivated") {
+      revokeSession(payload.sid);
+      sendJson(res, 403, { error: "Account is deactivated" });
       return;
     }
 
@@ -950,14 +1063,174 @@ async function handleRequest(req, res) {
   if (method === "GET" && path === "/api/auth/me") {
     const auth = requireAuth(req);
     const user = db
-      .prepare("SELECT id, name, email, phone, avatar, role, createdAt FROM users WHERE id = ?")
+      .prepare("SELECT id, name, username, email, phone, avatar, bio, role, accountStatus, createdAt FROM users WHERE id = ?")
       .get(auth.userId);
     if (!user) {
       sendJson(res, 401, { error: "Session is no longer valid" });
       return;
     }
 
+    if (user.accountStatus === "deactivated") {
+      revokeSession(auth.sessionId);
+      sendJson(res, 403, { error: "Account is deactivated" });
+      return;
+    }
+
     sendJson(res, 200, { user: rowToUser(user) });
+    return;
+  }
+
+  if (method === "PATCH" && path === "/api/auth/profile") {
+    const auth = requireAuth(req);
+    const body = await readBody(req);
+    const current = db.prepare("SELECT id, name, username, email, phone, avatar, bio, role, accountStatus, createdAt FROM users WHERE id = ?").get(auth.userId);
+    if (!current) {
+      sendJson(res, 404, { error: "User not found" });
+      return;
+    }
+
+    const nextName = body.name == null ? current.name : sanitizeText(body.name, 30);
+    const nextUsername = body.username == null ? current.username : sanitizeUsername(body.username);
+    const nextPhone = body.phone == null ? current.phone : sanitizeText(body.phone, 20);
+    const nextAvatar = body.avatar == null ? current.avatar : String(body.avatar || "").trim().slice(0, 5_000_000);
+    const nextBio = body.bio == null ? current.bio : sanitizeText(body.bio, 280);
+
+    if (!nextName) {
+      sendJson(res, 400, { error: "Name is required" });
+      return;
+    }
+
+    if (nextUsername) {
+      const existingUsername = db
+        .prepare("SELECT id FROM users WHERE lower(username) = ? AND id <> ?")
+        .get(String(nextUsername).toLowerCase(), auth.userId);
+      if (existingUsername) {
+        sendJson(res, 409, { error: "Username is already in use" });
+        return;
+      }
+    }
+
+    db.prepare("UPDATE users SET name = ?, username = ?, phone = ?, avatar = ?, bio = ? WHERE id = ?")
+      .run(nextName, nextUsername, nextPhone, nextAvatar, nextBio, auth.userId);
+
+    const updated = db.prepare("SELECT id, name, username, email, phone, avatar, bio, role, accountStatus, createdAt FROM users WHERE id = ?").get(auth.userId);
+    writeAuditLog(req, auth, "update_profile", "user", auth.userId, {
+      nameUpdated: nextName !== current.name,
+      usernameUpdated: String(nextUsername || "") !== String(current.username || ""),
+      phoneUpdated: String(nextPhone || "") !== String(current.phone || ""),
+      avatarUpdated: String(nextAvatar || "") !== String(current.avatar || ""),
+      bioUpdated: String(nextBio || "") !== String(current.bio || ""),
+    });
+    sendJson(res, 200, { user: rowToUser(updated) });
+    return;
+  }
+
+  if (method === "POST" && path === "/api/auth/change-email") {
+    const auth = requireAuth(req);
+    const body = await readBody(req);
+    const email = sanitizeText(body.email, 120).toLowerCase();
+    const password = String(body.password || "").trim();
+    if (!email || !password) {
+      sendJson(res, 400, { error: "Email and current password are required" });
+      return;
+    }
+
+    const existing = db.prepare("SELECT id FROM users WHERE email = ? AND id <> ?").get(email, auth.userId);
+    if (existing) {
+      sendJson(res, 409, { error: "An account with that email already exists" });
+      return;
+    }
+
+    const user = db.prepare("SELECT id, password FROM users WHERE id = ?").get(auth.userId);
+    if (!user || !verifyPassword(password, user.password)) {
+      sendJson(res, 401, { error: "Current password is invalid" });
+      return;
+    }
+
+    const role = roleForEmail(email);
+    db.prepare("UPDATE users SET email = ?, role = ? WHERE id = ?").run(email, role, auth.userId);
+    const updated = db.prepare("SELECT id, name, username, email, phone, avatar, bio, role, accountStatus, createdAt FROM users WHERE id = ?").get(auth.userId);
+    writeAuditLog(req, auth, "change_email", "user", auth.userId, { email });
+    sendJson(res, 200, { user: rowToUser(updated) });
+    return;
+  }
+
+  if (method === "POST" && path === "/api/auth/change-password") {
+    const auth = requireAuth(req);
+    const body = await readBody(req);
+    const currentPassword = String(body.currentPassword || "").trim();
+    const newPassword = String(body.newPassword || "").trim();
+
+    if (!currentPassword || !newPassword) {
+      sendJson(res, 400, { error: "Current password and new password are required" });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      sendJson(res, 400, { error: "New password must be at least 8 characters" });
+      return;
+    }
+
+    const user = db.prepare("SELECT id, password FROM users WHERE id = ?").get(auth.userId);
+    if (!user || !verifyPassword(currentPassword, user.password)) {
+      sendJson(res, 401, { error: "Current password is invalid" });
+      return;
+    }
+
+    db.prepare("UPDATE users SET password = ? WHERE id = ?").run(hashPassword(newPassword), auth.userId);
+    revokeSessionsForUser(auth.userId, auth.sessionId);
+    writeAuditLog(req, auth, "change_password", "user", auth.userId);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (method === "POST" && path === "/api/auth/account-actions/request") {
+    const auth = requireAuth(req);
+    const body = await readBody(req);
+    const action = String(body.action || "").trim();
+    if (action !== "deactivate" && action !== "delete") {
+      sendJson(res, 400, { error: "Action must be deactivate or delete" });
+      return;
+    }
+
+    const token = createAccountActionToken(auth.userId, action);
+    writeAuditLog(req, auth, "request_account_action_token", "user", auth.userId, { action });
+    sendJson(res, 200, { ok: true, action, confirmationToken: token.confirmationToken, expiresAt: token.expiresAt });
+    return;
+  }
+
+  if (method === "POST" && path === "/api/auth/account-actions/confirm") {
+    const auth = requireAuth(req);
+    const body = await readBody(req);
+    const action = String(body.action || "").trim();
+    const confirmationToken = String(body.confirmationToken || "").trim();
+    if (!confirmationToken || (action !== "deactivate" && action !== "delete")) {
+      sendJson(res, 400, { error: "Valid action and confirmationToken are required" });
+      return;
+    }
+
+    const valid = consumeAccountActionToken(auth.userId, action, confirmationToken);
+    if (!valid) {
+      sendJson(res, 401, { error: "Invalid or expired confirmation token" });
+      return;
+    }
+
+    if (action === "deactivate") {
+      db.prepare("UPDATE users SET accountStatus = 'deactivated' WHERE id = ?").run(auth.userId);
+      revokeSessionsForUser(auth.userId);
+      writeAuditLog(req, auth, "deactivate_account", "user", auth.userId);
+      sendJson(res, 200, { ok: true, action, accountStatus: "deactivated" });
+      return;
+    }
+
+    const tx = db.transaction(() => {
+      db.prepare("DELETE FROM account_action_tokens WHERE userId = ?").run(auth.userId);
+      db.prepare("DELETE FROM auth_sessions WHERE userId = ?").run(auth.userId);
+      db.prepare("DELETE FROM users WHERE id = ?").run(auth.userId);
+    });
+    tx();
+    writeAuditLog(req, auth, "delete_own_account", "user", auth.userId);
+    sendJson(res, 200, { ok: true, action: "delete", deleted: true });
     return;
   }
 
@@ -996,6 +1269,8 @@ async function handleRequest(req, res) {
         sendJson(res, 403, { error: "Not allowed to delete this account" });
         return;
       }
+      db.prepare("DELETE FROM account_action_tokens WHERE userId = ?").run(id);
+      db.prepare("DELETE FROM auth_sessions WHERE userId = ?").run(id);
       db.prepare("DELETE FROM users WHERE id = ?").run(id);
       if (auth.role === "admin") {
         writeAuditLog(req, auth, "delete_user", "user", id);
@@ -1102,6 +1377,7 @@ await migrateLegacyJson();
 migrateLegacyPlaintextPasswords();
 syncAdminRoles();
 purgeExpiredSessions();
+purgeExpiredActionTokens();
 scheduleBackupsIfEnabled();
 
 const server = createServer((req, res) => {

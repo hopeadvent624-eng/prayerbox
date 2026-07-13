@@ -499,60 +499,509 @@ function OfflineNotice({ message }: { message: string }) {
   );
 }
 
-function SettingsScreen({ onBack, onLogout, currentUser }: { onBack: () => void; onLogout: () => void; currentUser: AuthUser | null }) {
-  const [streakResetDone, setStreakResetDone] = useState(false);
+function SettingsScreen({
+  onBack,
+  onLogout,
+  currentUser,
+  onUpdateCurrentUser,
+}: {
+  onBack: () => void;
+  onLogout: () => void;
+  currentUser: AuthUser | null;
+  onUpdateCurrentUser: (updates: Partial<AuthUser>) => void;
+}) {
+  const [profileImage, setProfileImage] = useState(currentUser?.avatar || "");
+  const [fullName, setFullName] = useState(currentUser?.name || "");
+  const [username, setUsername] = useState(currentUser?.username || (currentUser?.name || "").toLowerCase().replace(/\s+/g, "_"));
+  const [email, setEmail] = useState(currentUser?.email || "");
+  const [phone, setPhone] = useState(currentUser?.phone || "");
+  const [bio, setBio] = useState(currentUser?.bio || "");
+  const [changeEmailInput, setChangeEmailInput] = useState(currentUser?.email || "");
+  const [saveMessage, setSaveMessage] = useState("");
 
-  const resetLocalPrayerData = () => {
+  const [passwordCurrent, setPasswordCurrent] = useState("");
+  const [passwordNext, setPasswordNext] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [securityBusy, setSecurityBusy] = useState(false);
+  const [accountActionMessage, setAccountActionMessage] = useState("");
+
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [sessions, setSessions] = useState<AuthSession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+
+  const [emailNotifications, setEmailNotifications] = useState(true);
+  const [pushNotifications, setPushNotifications] = useState(true);
+  const [smsNotifications, setSmsNotifications] = useState(false);
+  const [marketingEmails, setMarketingEmails] = useState(false);
+  const [securityAlerts, setSecurityAlerts] = useState(true);
+
+  const [themeMode, setThemeMode] = useState<"light" | "dark" | "system">("system");
+  const [colorTheme, setColorTheme] = useState<"blue" | "emerald" | "amber">("blue");
+  const [fontSize, setFontSize] = useState<"small" | "medium" | "large">("medium");
+  const [compactMode, setCompactMode] = useState(false);
+
+  const [profileVisibility, setProfileVisibility] = useState<"public" | "community" | "private">("community");
+  const [dataSharing, setDataSharing] = useState(false);
+  const [locationPermission, setLocationPermission] = useState<"ask" | "enabled" | "disabled">("ask");
+  const [analyticsTracking, setAnalyticsTracking] = useState(true);
+
+  const [language, setLanguage] = useState("English");
+  const [country, setCountry] = useState("Zimbabwe");
+  const [currency, setCurrency] = useState("USD");
+  const [timeZone, setTimeZone] = useState("Africa/Harare");
+  const [dateFormat, setDateFormat] = useState("DD/MM/YYYY");
+
+  useEffect(() => {
+    setProfileImage(currentUser?.avatar || "");
+    setFullName(currentUser?.name || "");
+    setUsername(currentUser?.username || (currentUser?.name || "").toLowerCase().replace(/\s+/g, "_"));
+    setEmail(currentUser?.email || "");
+    setPhone(currentUser?.phone || "");
+    setBio(currentUser?.bio || "");
+    setChangeEmailInput(currentUser?.email || "");
+  }, [currentUser]);
+
+  useEffect(() => {
     try {
-      localStorage.removeItem("ayp_streak");
-      localStorage.removeItem("ayp_lastPrayer");
-      setStreakResetDone(true);
-      window.setTimeout(() => setStreakResetDone(false), 2000);
+      const saved = localStorage.getItem("ayp_settings");
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as Record<string, unknown>;
+      if (typeof parsed.bio === "string") setBio(parsed.bio);
+      if (typeof parsed.twoFactorEnabled === "boolean") setTwoFactorEnabled(parsed.twoFactorEnabled);
+      if (typeof parsed.emailNotifications === "boolean") setEmailNotifications(parsed.emailNotifications);
+      if (typeof parsed.pushNotifications === "boolean") setPushNotifications(parsed.pushNotifications);
+      if (typeof parsed.smsNotifications === "boolean") setSmsNotifications(parsed.smsNotifications);
+      if (typeof parsed.marketingEmails === "boolean") setMarketingEmails(parsed.marketingEmails);
+      if (typeof parsed.securityAlerts === "boolean") setSecurityAlerts(parsed.securityAlerts);
+      if (parsed.themeMode === "light" || parsed.themeMode === "dark" || parsed.themeMode === "system") setThemeMode(parsed.themeMode);
+      if (parsed.colorTheme === "blue" || parsed.colorTheme === "emerald" || parsed.colorTheme === "amber") setColorTheme(parsed.colorTheme);
+      if (parsed.fontSize === "small" || parsed.fontSize === "medium" || parsed.fontSize === "large") setFontSize(parsed.fontSize);
+      if (typeof parsed.compactMode === "boolean") setCompactMode(parsed.compactMode);
+      if (parsed.profileVisibility === "public" || parsed.profileVisibility === "community" || parsed.profileVisibility === "private") setProfileVisibility(parsed.profileVisibility);
+      if (typeof parsed.dataSharing === "boolean") setDataSharing(parsed.dataSharing);
+      if (parsed.locationPermission === "ask" || parsed.locationPermission === "enabled" || parsed.locationPermission === "disabled") setLocationPermission(parsed.locationPermission);
+      if (typeof parsed.analyticsTracking === "boolean") setAnalyticsTracking(parsed.analyticsTracking);
+      if (typeof parsed.language === "string") setLanguage(parsed.language);
+      if (typeof parsed.country === "string") setCountry(parsed.country);
+      if (typeof parsed.currency === "string") setCurrency(parsed.currency);
+      if (typeof parsed.timeZone === "string") setTimeZone(parsed.timeZone);
+      if (typeof parsed.dateFormat === "string") setDateFormat(parsed.dateFormat);
     } catch {
-      setStreakResetDone(false);
+      // Ignore malformed local settings
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setSessions([]);
+      return;
+    }
+    setSessionsLoading(true);
+    api.getSessions()
+      .then((result) => setSessions(result.sessions || []))
+      .catch(() => setSessions([]))
+      .finally(() => setSessionsLoading(false));
+  }, [currentUser]);
+
+  const onProfileImageSelected = (file: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setProfileImage(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const saveAllSettings = async () => {
+    try {
+      localStorage.setItem(
+        "ayp_settings",
+        JSON.stringify({
+          bio,
+          twoFactorEnabled,
+          emailNotifications,
+          pushNotifications,
+          smsNotifications,
+          marketingEmails,
+          securityAlerts,
+          themeMode,
+          colorTheme,
+          fontSize,
+          compactMode,
+          profileVisibility,
+          dataSharing,
+          locationPermission,
+          analyticsTracking,
+          language,
+          country,
+          currency,
+          timeZone,
+          dateFormat,
+        })
+      );
+    } catch {
+      // ignore localStorage errors
+    }
+
+    try {
+      const response = await api.updateProfile({
+        name: fullName,
+        username,
+        phone,
+        avatar: profileImage,
+        bio,
+      });
+      onUpdateCurrentUser(response.user);
+      setSaveMessage("Settings saved.");
+    } catch (error) {
+      setSaveMessage(error instanceof Error ? error.message : "Unable to save profile changes.");
+    }
+    window.setTimeout(() => setSaveMessage(""), 2000);
+  };
+
+  const handleChangeEmail = async () => {
+    if (!changeEmailInput.trim()) return;
+    const password = window.prompt("Enter your current password to change email:") || "";
+    if (!password.trim()) return;
+    try {
+      const response = await api.changeEmail(changeEmailInput.trim(), password);
+      setEmail(response.user.email || changeEmailInput.trim());
+      onUpdateCurrentUser(response.user);
+      setSaveMessage("Email updated.");
+    } catch (error) {
+      setSaveMessage(error instanceof Error ? error.message : "Unable to change email.");
+    }
+    window.setTimeout(() => setSaveMessage(""), 2000);
+  };
+
+  const handlePasswordSubmit = async () => {
+    setSecurityBusy(true);
+    if (!passwordCurrent || !passwordNext || !passwordConfirm) {
+      setPasswordMessage("Please complete all password fields.");
+      setSecurityBusy(false);
+      return;
+    }
+    if (passwordNext.length < 8) {
+      setPasswordMessage("New password must be at least 8 characters.");
+      setSecurityBusy(false);
+      return;
+    }
+    if (passwordNext !== passwordConfirm) {
+      setPasswordMessage("New password and confirmation do not match.");
+      setSecurityBusy(false);
+      return;
+    }
+
+    try {
+      await api.changePassword(passwordCurrent, passwordNext);
+      setPasswordMessage("Password updated. Other sessions have been revoked.");
+    } catch (error) {
+      setPasswordMessage(error instanceof Error ? error.message : "Unable to update password.");
+    }
+    setSecurityBusy(false);
+    setPasswordCurrent("");
+    setPasswordNext("");
+    setPasswordConfirm("");
+  };
+
+  const handleLogoutAllDevices = async () => {
+    const confirmed = window.confirm("Log out from all devices, including this one?");
+    if (!confirmed) return;
+    try {
+      await api.logoutAll(true);
+    } finally {
+      onLogout();
     }
   };
 
+  const handleDeactivateAccount = async () => {
+    const confirmed = window.confirm("Deactivate this account on this device now?");
+    if (!confirmed) return;
+
+    try {
+      const tokenResponse = await api.requestAccountActionToken("deactivate");
+      const tokenInput = window.prompt(
+        `Confirmation token generated (expires ${new Date(tokenResponse.expiresAt).toLocaleTimeString()}). Enter token to confirm deactivation:`,
+        tokenResponse.confirmationToken
+      );
+      if (!tokenInput) return;
+      await api.confirmAccountAction("deactivate", tokenInput.trim());
+      setAccountActionMessage("Account deactivated.");
+      onLogout();
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : "Unable to deactivate account.");
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    const confirmed = window.confirm("Delete account permanently? This cannot be undone.");
+    if (!confirmed) return;
+
+    try {
+      const tokenResponse = await api.requestAccountActionToken("delete");
+      const tokenInput = window.prompt(
+        `Confirmation token generated (expires ${new Date(tokenResponse.expiresAt).toLocaleTimeString()}). Enter token to permanently delete your account:`,
+        tokenResponse.confirmationToken
+      );
+      if (!tokenInput) return;
+      await api.confirmAccountAction("delete", tokenInput.trim());
+      setAccountActionMessage("Account deleted.");
+      onLogout();
+      return;
+    } catch {
+      // fall back below
+    }
+
+    if (typeof currentUser?.id === "number") {
+      try {
+        await api.deleteUser(currentUser.id);
+      } catch {
+        // Ignore if endpoint is restricted; still clear local session
+      }
+    }
+    onLogout();
+  };
+
+  const subscriptionStatus = "Free Plan";
+  const createdLabel = currentUser?.createdAt ? new Date(currentUser.createdAt).toLocaleDateString() : "Unknown";
+
   return (
-    <div className="min-h-screen bg-[#F5F6FA] flex items-center justify-center px-6 py-16">
-      <div className="max-w-md w-full rounded-2xl bg-white p-7" style={{ boxShadow: "0 4px 24px rgba(30,58,138,0.08)" }}>
-        <div className="flex items-center gap-2 mb-6">
-          <Settings size={18} className="text-[#1E3A8A]" />
-          <h2 className="text-xl font-bold text-[#1E2A4A]">Settings</h2>
+    <div className="min-h-screen bg-[#F5F6FA] px-6 py-10">
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="rounded-2xl bg-white p-6" style={{ boxShadow: "0 4px 24px rgba(30,58,138,0.08)" }}>
+          <div className="flex items-center gap-2">
+            <Settings size={18} className="text-[#1E3A8A]" />
+            <h2 className="text-xl font-bold text-[#1E2A4A]">Settings</h2>
+          </div>
+          <p className="text-sm text-[#7A85A3] mt-1">Manage your profile, account, security, and app preferences.</p>
+          {saveMessage && <p className="text-xs font-semibold text-green-600 mt-3">{saveMessage}</p>}
+          {accountActionMessage && <p className="text-xs font-semibold text-amber-700 mt-1">{accountActionMessage}</p>}
         </div>
 
-        <div className="space-y-4">
-          <div className="rounded-xl border border-[#EEF2FF] bg-[#F8FAFF] p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#7A85A3] mb-2">Account</p>
-            <p className="text-sm font-semibold text-[#1E2A4A]">{currentUser?.name || "Guest user"}</p>
-            <p className="text-xs text-[#7A85A3] mt-0.5">{currentUser?.email || "Sign in to manage account settings."}</p>
-            {currentUser?.role && (
-              <p className="text-xs text-[#1E3A8A] mt-2">Role: {currentUser.role}</p>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-[#EEF2FF] bg-white p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#7A85A3] mb-3">Security</p>
-            <div className="space-y-2 text-sm text-[#2D3A5E]">
-              <p>Session: You are signed in on this device.</p>
-              <p>Password: Managed securely by the AY Prayerbox backend.</p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <section className="rounded-2xl bg-white p-6 space-y-4" style={{ boxShadow: "0 2px 14px rgba(0,0,0,0.05)" }}>
+            <h3 className="text-lg font-bold text-[#1E2A4A]">1. Profile</h3>
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded-full bg-[#EEF2FF] overflow-hidden flex items-center justify-center">
+                {profileImage ? <img src={profileImage} alt="Profile" className="w-full h-full object-cover" /> : <User size={24} className="text-[#1E3A8A]" />}
+              </div>
+              <label className="text-xs font-semibold text-[#1E2A4A] cursor-pointer">
+                <span className="inline-flex h-9 px-3 rounded-lg bg-[#EEF2FF] items-center">Upload Image</span>
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => onProfileImageSelected(e.target.files?.[0] || null)} />
+              </label>
             </div>
-          </div>
+            <TextInput value={fullName} onChange={setFullName} placeholder="Full name" />
+            <TextInput value={username} onChange={setUsername} placeholder="Username" />
+            <TextInput value={email} onChange={setEmail} placeholder="Email address" />
+            <TextInput value={phone} onChange={setPhone} placeholder="Phone number" />
+            <Textarea value={bio} onChange={setBio} placeholder="Bio" rows={3} maxLength={280} />
+            <PrimaryButton onClick={saveAllSettings} className="w-full h-11">Save Changes</PrimaryButton>
+          </section>
 
-          <div className="rounded-xl border border-[#EEF2FF] bg-white p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#7A85A3] mb-3">App Data</p>
-            <p className="text-sm text-[#2D3A5E] mb-3">Reset locally stored prayer streak information for this device.</p>
-            <button
-              onClick={resetLocalPrayerData}
-              className="h-9 px-3 rounded-lg bg-[#F5F6FA] text-[#1E2A4A] text-xs font-semibold hover:bg-[#EEF2FF] transition-colors"
-            >
-              Reset Prayer Streak Data
-            </button>
-            {streakResetDone && <p className="text-xs text-green-600 mt-2">Local streak data reset successfully.</p>}
-          </div>
+          <section className="rounded-2xl bg-white p-6 space-y-4" style={{ boxShadow: "0 2px 14px rgba(0,0,0,0.05)" }}>
+            <h3 className="text-lg font-bold text-[#1E2A4A]">2. Account</h3>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-xl bg-[#F5F6FA] p-3"><p className="text-[#7A85A3] text-xs">Account Type</p><p className="font-semibold text-[#1E2A4A] capitalize">{currentUser?.role || "user"}</p></div>
+              <div className="rounded-xl bg-[#F5F6FA] p-3"><p className="text-[#7A85A3] text-xs">Subscription</p><p className="font-semibold text-[#1E2A4A]">{subscriptionStatus}</p></div>
+              <div className="rounded-xl bg-[#F5F6FA] p-3 col-span-2"><p className="text-[#7A85A3] text-xs">Created</p><p className="font-semibold text-[#1E2A4A]">{createdLabel}</p></div>
+            </div>
+            <div className="space-y-2">
+              <TextInput value={changeEmailInput} onChange={setChangeEmailInput} placeholder="Change email" />
+              <OutlineButton onClick={handleChangeEmail} className="w-full h-10">Change Email</OutlineButton>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button onClick={handleDeactivateAccount} className="h-10 rounded-lg bg-amber-50 text-amber-700 text-xs font-semibold">Deactivate Account</button>
+              <button onClick={handleDeleteAccount} className="h-10 rounded-lg bg-red-50 text-red-600 text-xs font-semibold">Delete Account</button>
+            </div>
+          </section>
+
+          <section className="rounded-2xl bg-white p-6 space-y-4 lg:col-span-2" style={{ boxShadow: "0 2px 14px rgba(0,0,0,0.05)" }}>
+            <h3 className="text-lg font-bold text-[#1E2A4A]">3. Security</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-[#1E2A4A]">Change Password</p>
+                <TextInput value={passwordCurrent} onChange={setPasswordCurrent} placeholder="Current password" type="password" />
+                <TextInput value={passwordNext} onChange={setPasswordNext} placeholder="New password" type="password" />
+                <TextInput value={passwordConfirm} onChange={setPasswordConfirm} placeholder="Confirm new password" type="password" />
+                <OutlineButton onClick={handlePasswordSubmit} disabled={securityBusy} className="w-full h-10">Update Password</OutlineButton>
+                {passwordMessage && <p className="text-xs text-[#7A85A3]">{passwordMessage}</p>}
+              </div>
+
+              <div className="space-y-3">
+                <div className="rounded-xl border border-[#EEF2FF] p-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-[#1E2A4A]">Two-Factor Authentication</p>
+                    <p className="text-xs text-[#7A85A3]">Require extra verification on sign-in.</p>
+                  </div>
+                  <button onClick={() => setTwoFactorEnabled((v) => !v)} className={cn("h-7 px-3 rounded-full text-xs font-bold", twoFactorEnabled ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600")}>{twoFactorEnabled ? "On" : "Off"}</button>
+                </div>
+                <button onClick={handleLogoutAllDevices} className="w-full h-10 rounded-lg bg-red-50 text-red-600 text-xs font-semibold">Logout From All Devices</button>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-sm font-semibold text-[#1E2A4A] mb-2">Login Activity</p>
+              <div className="overflow-x-auto rounded-xl border border-[#EEF2FF]">
+                <table className="w-full text-xs">
+                  <thead className="bg-[#F8FAFF] text-[#7A85A3]">
+                    <tr>
+                      <th className="text-left px-3 py-2">Device</th>
+                      <th className="text-left px-3 py-2">IP</th>
+                      <th className="text-left px-3 py-2">Last Used</th>
+                      <th className="text-left px-3 py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessionsLoading ? (
+                      <tr><td className="px-3 py-3 text-[#9AA3BC]" colSpan={4}>Loading activity...</td></tr>
+                    ) : sessions.length === 0 ? (
+                      <tr><td className="px-3 py-3 text-[#9AA3BC]" colSpan={4}>No activity found.</td></tr>
+                    ) : (
+                      sessions.slice(0, 8).map((session) => (
+                        <tr key={session.id} className="border-t border-[#EEF2FF]">
+                          <td className="px-3 py-2 text-[#1E2A4A]">{session.userAgent || "Unknown device"}</td>
+                          <td className="px-3 py-2 text-[#2D3A5E]">{session.ipAddress || "—"}</td>
+                          <td className="px-3 py-2 text-[#2D3A5E]">{new Date(session.lastUsedAt).toLocaleString()}</td>
+                          <td className="px-3 py-2">{session.current ? <span className="text-green-700">Current</span> : session.revokedAt ? <span className="text-red-600">Revoked</span> : <span className="text-[#1E3A8A]">Active</span>}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-sm font-semibold text-[#1E2A4A] mb-2">Active Sessions/Devices</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {sessions.filter((s) => !s.revokedAt).slice(0, 4).map((session) => (
+                  <div key={session.id} className="rounded-xl bg-[#F5F6FA] p-3">
+                    <p className="text-xs font-semibold text-[#1E2A4A] line-clamp-1">{session.userAgent || "Unknown device"}</p>
+                    <p className="text-[11px] text-[#7A85A3]">{session.ipAddress || "—"}</p>
+                  </div>
+                ))}
+                {sessions.filter((s) => !s.revokedAt).length === 0 && <p className="text-xs text-[#9AA3BC]">No active sessions.</p>}
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-2xl bg-white p-6 space-y-4" style={{ boxShadow: "0 2px 14px rgba(0,0,0,0.05)" }}>
+            <h3 className="text-lg font-bold text-[#1E2A4A]">4. Notifications</h3>
+            {([
+              { label: "Email notifications", value: emailNotifications, toggle: () => setEmailNotifications((v) => !v) },
+              { label: "Push notifications", value: pushNotifications, toggle: () => setPushNotifications((v) => !v) },
+              { label: "SMS notifications", value: smsNotifications, toggle: () => setSmsNotifications((v) => !v) },
+              { label: "Marketing emails", value: marketingEmails, toggle: () => setMarketingEmails((v) => !v) },
+              { label: "Security alerts", value: securityAlerts, toggle: () => setSecurityAlerts((v) => !v) },
+            ]).map((item) => (
+              <div key={item.label} className="rounded-xl border border-[#EEF2FF] p-3 flex items-center justify-between">
+                <p className="text-sm font-medium text-[#1E2A4A]">{item.label}</p>
+                <button
+                  onClick={item.toggle}
+                  className={cn("h-7 px-3 rounded-full text-xs font-bold", item.value ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600")}
+                >
+                  {item.value ? "On" : "Off"}
+                </button>
+              </div>
+            ))}
+          </section>
+
+          <section className="rounded-2xl bg-white p-6 space-y-4" style={{ boxShadow: "0 2px 14px rgba(0,0,0,0.05)" }}>
+            <h3 className="text-lg font-bold text-[#1E2A4A]">5. Appearance</h3>
+            <div>
+              <p className="text-xs text-[#7A85A3] mb-2">Theme Mode</p>
+              <div className="flex gap-2 flex-wrap">
+                {(["light", "dark", "system"] as const).map((mode) => (
+                  <button key={mode} onClick={() => setThemeMode(mode)} className={cn("h-8 px-3 rounded-lg text-xs font-semibold border", themeMode === mode ? "bg-[#1E3A8A] border-[#1E3A8A] text-white" : "bg-white border-[#E5EAF7] text-[#1E2A4A]")}>{mode}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-[#7A85A3] mb-2">Color Theme</p>
+              <select value={colorTheme} onChange={(e) => setColorTheme(e.target.value as "blue" | "emerald" | "amber")} className="w-full h-10 px-3 rounded-xl bg-[#F5F6FA] text-sm text-[#1E2A4A] outline-none">
+                <option value="blue">Blue</option>
+                <option value="emerald">Emerald</option>
+                <option value="amber">Amber</option>
+              </select>
+            </div>
+            <div>
+              <p className="text-xs text-[#7A85A3] mb-2">Font Size</p>
+              <select value={fontSize} onChange={(e) => setFontSize(e.target.value as "small" | "medium" | "large")} className="w-full h-10 px-3 rounded-xl bg-[#F5F6FA] text-sm text-[#1E2A4A] outline-none">
+                <option value="small">Small</option>
+                <option value="medium">Medium</option>
+                <option value="large">Large</option>
+              </select>
+            </div>
+            <div className="rounded-xl border border-[#EEF2FF] p-3 flex items-center justify-between">
+              <p className="text-sm font-medium text-[#1E2A4A]">Compact Mode</p>
+              <button onClick={() => setCompactMode((v) => !v)} className={cn("h-7 px-3 rounded-full text-xs font-bold", compactMode ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600")}>{compactMode ? "On" : "Off"}</button>
+            </div>
+          </section>
+
+          <section className="rounded-2xl bg-white p-6 space-y-4" style={{ boxShadow: "0 2px 14px rgba(0,0,0,0.05)" }}>
+            <h3 className="text-lg font-bold text-[#1E2A4A]">6. Privacy</h3>
+            <div>
+              <p className="text-xs text-[#7A85A3] mb-2">Profile Visibility</p>
+              <select value={profileVisibility} onChange={(e) => setProfileVisibility(e.target.value as "public" | "community" | "private")} className="w-full h-10 px-3 rounded-xl bg-[#F5F6FA] text-sm text-[#1E2A4A] outline-none">
+                <option value="public">Public</option>
+                <option value="community">Community Only</option>
+                <option value="private">Private</option>
+              </select>
+            </div>
+            <div className="rounded-xl border border-[#EEF2FF] p-3 flex items-center justify-between">
+              <p className="text-sm font-medium text-[#1E2A4A]">Data Sharing</p>
+              <button onClick={() => setDataSharing((v) => !v)} className={cn("h-7 px-3 rounded-full text-xs font-bold", dataSharing ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600")}>{dataSharing ? "On" : "Off"}</button>
+            </div>
+            <div>
+              <p className="text-xs text-[#7A85A3] mb-2">Location Permission</p>
+              <select value={locationPermission} onChange={(e) => setLocationPermission(e.target.value as "ask" | "enabled" | "disabled")} className="w-full h-10 px-3 rounded-xl bg-[#F5F6FA] text-sm text-[#1E2A4A] outline-none">
+                <option value="ask">Ask Every Time</option>
+                <option value="enabled">Enabled</option>
+                <option value="disabled">Disabled</option>
+              </select>
+            </div>
+            <div className="rounded-xl border border-[#EEF2FF] p-3 flex items-center justify-between">
+              <p className="text-sm font-medium text-[#1E2A4A]">Analytics Tracking</p>
+              <button onClick={() => setAnalyticsTracking((v) => !v)} className={cn("h-7 px-3 rounded-full text-xs font-bold", analyticsTracking ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600")}>{analyticsTracking ? "On" : "Off"}</button>
+            </div>
+          </section>
+
+          <section className="rounded-2xl bg-white p-6 space-y-4 lg:col-span-2" style={{ boxShadow: "0 2px 14px rgba(0,0,0,0.05)" }}>
+            <h3 className="text-lg font-bold text-[#1E2A4A]">7. Language & Region</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+              <select value={language} onChange={(e) => setLanguage(e.target.value)} className="h-10 px-3 rounded-xl bg-[#F5F6FA] text-sm text-[#1E2A4A] outline-none">
+                <option>English</option>
+                <option>Shona</option>
+                <option>Ndebele</option>
+              </select>
+              <select value={country} onChange={(e) => setCountry(e.target.value)} className="h-10 px-3 rounded-xl bg-[#F5F6FA] text-sm text-[#1E2A4A] outline-none">
+                <option>Zimbabwe</option>
+                <option>South Africa</option>
+                <option>Zambia</option>
+              </select>
+              <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="h-10 px-3 rounded-xl bg-[#F5F6FA] text-sm text-[#1E2A4A] outline-none">
+                <option>USD</option>
+                <option>ZWL</option>
+                <option>ZAR</option>
+              </select>
+              <select value={timeZone} onChange={(e) => setTimeZone(e.target.value)} className="h-10 px-3 rounded-xl bg-[#F5F6FA] text-sm text-[#1E2A4A] outline-none">
+                <option>Africa/Harare</option>
+                <option>Africa/Johannesburg</option>
+                <option>UTC</option>
+              </select>
+              <select value={dateFormat} onChange={(e) => setDateFormat(e.target.value)} className="h-10 px-3 rounded-xl bg-[#F5F6FA] text-sm text-[#1E2A4A] outline-none">
+                <option>DD/MM/YYYY</option>
+                <option>MM/DD/YYYY</option>
+                <option>YYYY-MM-DD</option>
+              </select>
+            </div>
+          </section>
         </div>
 
-        <div className="mt-6 space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <OutlineButton onClick={onBack} className="w-full h-12 gap-2">
             <ArrowLeft size={14} /> Back
           </OutlineButton>
@@ -2425,7 +2874,16 @@ export default function App() {
               onBack={() => navigate("submit")}
             />
           )}
-          {screen === "settings" && <SettingsScreen onBack={() => navigate("submit")} onLogout={handleLogout} currentUser={currentUser} />}
+          {screen === "settings" && (
+            <SettingsScreen
+              onBack={() => navigate("submit")}
+              onLogout={handleLogout}
+              currentUser={currentUser}
+              onUpdateCurrentUser={(updates) => {
+                setCurrentUser((prev) => (prev ? { ...prev, ...updates } : prev));
+              }}
+            />
+          )}
           {screen === "admin-login" && (
             <AdminLoginScreen
               onLogin={(user) => {

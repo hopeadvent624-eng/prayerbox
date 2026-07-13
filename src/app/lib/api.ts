@@ -29,11 +29,21 @@ export interface PrayerboxState {
 export interface AuthUser {
   id: number;
   name: string;
+  username?: string;
   email: string;
   role?: "user" | "admin";
   phone?: string;
   avatar?: string;
+  bio?: string;
+  accountStatus?: "active" | "deactivated";
   createdAt?: string;
+}
+
+export interface AccountActionTokenResponse {
+  ok: boolean;
+  action: "deactivate" | "delete";
+  confirmationToken: string;
+  expiresAt: string;
 }
 
 export interface AuthResponse {
@@ -208,6 +218,34 @@ export const api = {
   getAuthToken: () => authToken,
   getRefreshToken: () => refreshToken,
   getCurrentUser: () => request<{ user: AuthUser }>("/api/auth/me"),
+  updateProfile: (payload: { name?: string; username?: string; phone?: string; avatar?: string; bio?: string }) =>
+    request<{ user: AuthUser }>("/api/auth/profile", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  changeEmail: (email: string, password: string) =>
+    request<{ user: AuthUser }>("/api/auth/change-email", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ ok: boolean }>("/api/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+  requestAccountActionToken: (action: "deactivate" | "delete") =>
+    request<AccountActionTokenResponse>("/api/auth/account-actions/request", {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    }),
+  confirmAccountAction: (action: "deactivate" | "delete", confirmationToken: string) =>
+    request<{ ok: boolean; action: "deactivate" | "delete"; accountStatus?: "deactivated"; deleted?: boolean }>(
+      "/api/auth/account-actions/confirm",
+      {
+        method: "POST",
+        body: JSON.stringify({ action, confirmationToken }),
+      }
+    ),
   getState: () => request<PrayerboxState>("/api/state"),
   getUsers: () => request<AuthUser[]>("/api/users"),
   register: async (name: string, email: string, password: string, phone: string, avatar: string) => {

@@ -11,6 +11,7 @@ const dbFile = join(tmpdir(), `ay-prayerbox-test-${Date.now()}.sqlite`);
 const serverPath = fileURLToPath(new URL("./index.mjs", import.meta.url));
 const dataSource = join(fileURLToPath(new URL("./data.json", import.meta.url)));
 const testEmail = `test-${Date.now()}@example.com`;
+const secondUserEmail = `self-service-${Date.now()}@example.com`;
 let authToken = "";
 let refreshToken = "";
 let serverProcess;
@@ -237,6 +238,40 @@ async function runTests() {
   refreshToken = reloginAfterLogoutAll.json.refreshToken;
   log("POST /api/auth/login (after logout-all) OK");
 
+  const profileUpdateResponse = await request("/api/auth/profile", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Test User Updated",
+      username: "test_user_updated",
+      phone: "+263771234567",
+      bio: "Updated through API tests",
+      avatar: "https://example.com/avatar.png",
+    }),
+  });
+  assert.strictEqual(profileUpdateResponse.response.status, 200, "Expected PATCH /api/auth/profile to return 200");
+  assert.strictEqual(profileUpdateResponse.json.user.name, "Test User Updated");
+  assert.strictEqual(profileUpdateResponse.json.user.username, "test_user_updated");
+  log("PATCH /api/auth/profile OK");
+
+  const changePasswordResponse = await request("/api/auth/change-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ currentPassword: "secret123", newPassword: "secret1234" }),
+  });
+  assert.strictEqual(changePasswordResponse.response.status, 200, "Expected POST /api/auth/change-password to return 200");
+  log("POST /api/auth/change-password OK");
+
+  const reloginWithNewPassword = await request("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: testEmail, password: "secret1234" }),
+  });
+  assert.strictEqual(reloginWithNewPassword.response.status, 200, "Expected login with new password to return 200");
+  authToken = reloginWithNewPassword.json.token;
+  refreshToken = reloginWithNewPassword.json.refreshToken;
+  log("POST /api/auth/login (new password) OK");
+
   const prayers = await request("/api/prayers");
   assert.strictEqual(prayers.response.status, 200, "Expected /api/prayers to return 200");
   assert.ok(Array.isArray(prayers.json), "Expected /api/prayers array");
@@ -313,6 +348,38 @@ async function runTests() {
   assert.ok(Array.isArray(auditResponse.json), "Expected audit logs array");
   assert.ok(auditResponse.json.length > 0, "Expected at least one audit log entry");
   log("GET /api/admin/audit-logs OK");
+
+  const selfUserRegister = await request("/api/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Self Service User", email: secondUserEmail, password: "secret5678" }),
+  });
+  assert.strictEqual(selfUserRegister.response.status, 201, "Expected second user register to return 201");
+  authToken = selfUserRegister.json.token;
+  refreshToken = selfUserRegister.json.refreshToken;
+  log("POST /api/auth/register (self-service user) OK");
+
+  const requestDeleteToken = await request("/api/auth/account-actions/request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "delete" }),
+  });
+  assert.strictEqual(requestDeleteToken.response.status, 200, "Expected POST /api/auth/account-actions/request to return 200");
+  assert.ok(requestDeleteToken.json.confirmationToken, "Expected confirmation token");
+  log("POST /api/auth/account-actions/request OK");
+
+  const confirmDelete = await request("/api/auth/account-actions/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "delete", confirmationToken: requestDeleteToken.json.confirmationToken }),
+  });
+  assert.strictEqual(confirmDelete.response.status, 200, "Expected POST /api/auth/account-actions/confirm delete to return 200");
+  assert.strictEqual(confirmDelete.json.deleted, true, "Expected deleted=true");
+  log("POST /api/auth/account-actions/confirm (delete) OK");
+
+  const deletedUserMe = await request("/api/auth/me");
+  assert.strictEqual(deletedUserMe.response.status, 401, "Expected GET /api/auth/me to return 401 after account delete");
+  log("GET /api/auth/me (post-delete) OK");
 
   log("All backend API tests passed.");
 }
