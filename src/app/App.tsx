@@ -1278,7 +1278,7 @@ function AdminLoginScreen({ onLogin, onBack }: { onLogin: () => void; onBack: ()
 
 // ─── Admin Dashboard ──────────────────────────────────────────────────────────
 
-type AdminTab = "pending" | "approved" | "testimonies" | "analytics";
+type AdminTab = "overview" | "pending" | "approved" | "testimonies" | "accounts" | "analytics";
 
 function AdminDashboard({
   prayers, testimonies, users, onApprovePrayer, onRejectPrayer, onToggleUrgent,
@@ -1295,92 +1295,243 @@ function AdminDashboard({
   onDeleteUser: (id: number) => void;
   onLogout: () => void;
 }) {
-  const [tab, setTab] = useState<AdminTab>("pending");
+  const [tab, setTab] = useState<AdminTab>("overview");
+  const [userSearch, setUserSearch] = useState("");
 
   const pendingPrayers = prayers.filter((p) => !p.approved);
   const approvedPrayers = prayers.filter((p) => p.approved);
   const pendingTestimonies = testimonies.filter((t) => !t.approved);
   const approvedTestimonies = testimonies.filter((t) => t.approved);
   const totalPrayers = prayers.reduce((sum, p) => sum + p.prayerCount, 0);
+  const totalPending = pendingPrayers.length + pendingTestimonies.length;
+
+  // Category breakdown
+  const categoryMap: Record<string, number> = {};
+  for (const p of prayers) {
+    categoryMap[p.category] = (categoryMap[p.category] ?? 0) + 1;
+  }
+  const topCategory = Object.entries(categoryMap).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+
+  // Top 5 most prayed
+  const topPrayers = [...approvedPrayers].sort((a, b) => b.prayerCount - a.prayerCount).slice(0, 5);
+
+  const filteredUsers = users.filter(
+    (u) =>
+      u.name?.toLowerCase().includes(userSearch.toLowerCase()) ||
+      u.email?.toLowerCase().includes(userSearch.toLowerCase())
+  );
 
   const tabs: { key: AdminTab; label: string; icon: typeof Send; badge?: number }[] = [
-    { key: "pending", label: "Pending", icon: FileText, badge: pendingPrayers.length + pendingTestimonies.length },
-    { key: "approved", label: "Approved", icon: CheckCircle },
-    { key: "testimonies", label: "Testimonies", icon: Sparkles },
-    { key: "analytics", label: "Analytics", icon: TrendingUp },
+    { key: "overview",    label: "Overview",    icon: Home },
+    { key: "pending",     label: "Pending",     icon: FileText,   badge: totalPending },
+    { key: "approved",   label: "Approved",    icon: CheckCircle },
+    { key: "testimonies",label: "Testimonies", icon: Sparkles },
+    { key: "accounts",   label: "Accounts",    icon: Users,      badge: users.length },
+    { key: "analytics",  label: "Analytics",   icon: TrendingUp },
   ];
 
   return (
     <div className="min-h-screen bg-[#F5F6FA]">
-      <div className="max-w-5xl mx-auto px-6 py-10">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-bold text-[#1E2A4A]">Leader Panel</h1>
-            <p className="text-[#7A85A3] text-sm mt-0.5">Moderate and manage content</p>
-          </div>
-          <button onClick={onLogout} className="flex items-center gap-2 text-[#7A85A3] hover:text-[#1E2A4A] text-sm font-medium transition-colors">
-            <LogOut size={15} /> Logout
-          </button>
-        </div>
-
-        {/* Stats row */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-8">
-          {[
-            { label: "Total Requests", value: prayers.length, icon: Send, color: "text-[#1E3A8A] bg-[#EEF2FF]" },
-            { label: "Prayers Offered", value: totalPrayers, icon: HandHeart, color: "text-purple-500 bg-purple-50" },
-            { label: "Testimonies", value: approvedTestimonies.length, icon: Sparkles, color: "text-amber-500 bg-amber-50" },
-            { label: "Pending Review", value: pendingPrayers.length + pendingTestimonies.length, icon: AlertTriangle, color: "text-red-500 bg-red-50" },
-            { label: "Accounts", value: users.length, icon: Users, color: "text-emerald-500 bg-emerald-50" },
-          ].map((stat) => {
-            const Icon = stat.icon;
-            return (
-              <div key={stat.label} className="bg-white rounded-2xl p-5" style={{ boxShadow: "0 2px 12px rgba(30,58,138,0.07)" }}>
-                <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center mb-3", stat.color.split(" ")[1])}>
-                  <Icon size={17} className={stat.color.split(" ")[0]} />
-                </div>
-                <p className="text-2xl font-bold text-[#1E2A4A]">{stat.value}</p>
-                <p className="text-[#7A85A3] text-xs mt-0.5">{stat.label}</p>
+      {/* ── Admin Navbar ── */}
+      <nav className="bg-[#1E2A4A] sticky top-0 z-50 shadow-lg">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="flex items-center justify-between h-14">
+            {/* brand */}
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center overflow-hidden">
+                <ImageWithFallback src={prayingHandsLogo} alt="logo" className="w-6 h-6 object-contain" />
               </div>
-            );
-          })}
-        </div>
+              <span className="font-bold text-white text-base tracking-tight hidden sm:block">AY Prayerbox</span>
+              <span className="ml-2 text-[10px] font-bold text-[#1E3A8A] bg-amber-300 px-2 py-0.5 rounded-full uppercase tracking-wider">Admin</span>
+            </div>
 
-        {/* Tabs */}
-        <div className="flex gap-2 mb-8 flex-wrap">
-          {tabs.map((t) => {
-            const Icon = t.icon;
-            return (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={cn(
-                  "px-4 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center gap-2",
-                  tab === t.key ? "bg-[#1E3A8A] text-white" : "bg-white text-[#7A85A3] hover:text-[#1E2A4A] border border-[#EEF2FF]"
-                )}
-                style={tab === t.key ? { boxShadow: "0 4px 14px rgba(30,58,138,0.3)" } : {}}
-              >
-                <Icon size={14} />
-                {t.label}
-                {t.badge != null && t.badge > 0 && (
-                  <span className={cn("w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center",
-                    tab === t.key ? "bg-white/25 text-white" : "bg-red-100 text-red-500"
-                  )}>
-                    {t.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+            {/* quick-stat pills */}
+            <div className="hidden md:flex items-center gap-3 text-xs">
+              <span className="bg-white/10 text-white px-3 py-1 rounded-full flex items-center gap-1.5">
+                <Send size={11} /> {prayers.length} requests
+              </span>
+              <span className="bg-white/10 text-white px-3 py-1 rounded-full flex items-center gap-1.5">
+                <Users size={11} /> {users.length} accounts
+              </span>
+              {totalPending > 0 && (
+                <span className="bg-red-500 text-white px-3 py-1 rounded-full flex items-center gap-1.5 animate-pulse">
+                  <AlertTriangle size={11} /> {totalPending} pending
+                </span>
+              )}
+            </div>
 
+            {/* logout */}
+            <button
+              onClick={onLogout}
+              className="flex items-center gap-1.5 text-white/70 hover:text-white text-xs font-medium transition-colors"
+            >
+              <LogOut size={14} /> <span className="hidden sm:block">Exit Admin</span>
+            </button>
+          </div>
+
+          {/* tab strip */}
+          <div className="flex gap-0.5 overflow-x-auto pb-0">
+            {tabs.map((t) => {
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setTab(t.key)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 sm:px-4 py-2.5 text-xs font-semibold whitespace-nowrap border-b-2 transition-colors",
+                    tab === t.key
+                      ? "border-amber-400 text-amber-300"
+                      : "border-transparent text-white/50 hover:text-white/80"
+                  )}
+                >
+                  <Icon size={13} />
+                  {t.label}
+                  {t.badge != null && t.badge > 0 && (
+                    <span className={cn(
+                      "ml-0.5 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center",
+                      tab === t.key ? "bg-amber-400 text-[#1E2A4A]" : "bg-red-500 text-white"
+                    )}>
+                      {t.badge > 9 ? "9+" : t.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </nav>
+
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         <AnimatePresence mode="wait">
-          {/* Pending */}
+
+          {/* ── Overview ── */}
+          {tab === "overview" && (
+            <motion.div key="overview" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+              <div>
+                <h2 className="text-xl font-bold text-[#1E2A4A]">Dashboard Overview</h2>
+                <p className="text-[#7A85A3] text-sm mt-0.5">Everything happening in AY Prayerbox at a glance.</p>
+              </div>
+
+              {/* KPI grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                {[
+                  { label: "Prayer Requests",   value: prayers.length,            icon: Send,          color: "text-[#1E3A8A] bg-[#EEF2FF]" },
+                  { label: "Prayers Offered",   value: totalPrayers,              icon: HandHeart,     color: "text-purple-600 bg-purple-50" },
+                  { label: "Testimonies",        value: approvedTestimonies.length,icon: Sparkles,      color: "text-amber-500 bg-amber-50" },
+                  { label: "Pending Review",     value: totalPending,              icon: AlertTriangle, color: "text-red-500 bg-red-50" },
+                  { label: "Registered Accounts",value: users.length,             icon: Users,         color: "text-emerald-600 bg-emerald-50" },
+                ].map((s) => {
+                  const Icon = s.icon;
+                  return (
+                    <div key={s.label} className="bg-white rounded-2xl p-5" style={{ boxShadow: "0 2px 12px rgba(30,58,138,0.07)" }}>
+                      <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center mb-3", s.color.split(" ")[1])}>
+                        <Icon size={17} className={s.color.split(" ")[0]} />
+                      </div>
+                      <p className="text-2xl font-bold text-[#1E2A4A]">{s.value}</p>
+                      <p className="text-[#7A85A3] text-xs mt-0.5">{s.label}</p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* recent pending + top prayers side by side */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* pending queue */}
+                <div className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.05)" }}>
+                  <div className="flex items-center justify-between mb-4">
+                    <p className="font-semibold text-[#1E2A4A]">Awaiting Review</p>
+                    {totalPending > 0 && (
+                      <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">{totalPending} items</span>
+                    )}
+                  </div>
+                  {totalPending === 0 ? (
+                    <div className="text-center py-8 text-[#9AA3BC]">
+                      <CheckCircle size={32} className="mx-auto mb-2 opacity-30" />
+                      <p className="text-sm">All caught up!</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {[...pendingPrayers.slice(0, 3), ...pendingTestimonies.slice(0, 2)].map((item) => (
+                        <div key={item.id} className="flex items-start gap-3 p-3 bg-[#F5F6FA] rounded-xl">
+                          <div className="w-7 h-7 rounded-full bg-[#EEF2FF] flex items-center justify-center text-xs font-bold text-[#1E3A8A] shrink-0 mt-0.5">
+                            {item.name[0]}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-[#1E2A4A] text-xs">{item.name}</p>
+                            <p className="text-[#7A85A3] text-xs truncate">{"request" in item ? item.request : item.text}</p>
+                          </div>
+                          <button
+                            onClick={() => "request" in item ? onApprovePrayer(item.id) : onApproveTestimony(item.id)}
+                            className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-1 rounded-lg shrink-0"
+                          >
+                            Approve
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* top prayers */}
+                <div className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.05)" }}>
+                  <p className="font-semibold text-[#1E2A4A] mb-4">Most Prayed Requests</p>
+                  {topPrayers.length === 0 ? (
+                    <p className="text-sm text-[#9AA3BC] text-center py-8">No prayers yet.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {topPrayers.map((p, i) => (
+                        <div key={p.id} className="flex items-center gap-3">
+                          <span className="text-[11px] font-bold text-[#7A85A3] w-4 shrink-0">{i + 1}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-[#1E2A4A] truncate">{p.name} — {p.category}</p>
+                            <div className="mt-1 h-1.5 rounded-full bg-[#EEF2FF] overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-[#1E3A8A]"
+                                style={{ width: `${Math.round((p.prayerCount / (topPrayers[0]?.prayerCount || 1)) * 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                          <span className="text-xs font-bold text-[#1E3A8A] shrink-0">{p.prayerCount}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* category breakdown */}
+              <div className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.05)" }}>
+                <p className="font-semibold text-[#1E2A4A] mb-4">Prayer Requests by Category</p>
+                <div className="space-y-3">
+                  {Object.entries(categoryMap).sort((a, b) => b[1] - a[1]).map(([cat, count]) => (
+                    <div key={cat} className="flex items-center gap-3">
+                      <span className="text-xs font-semibold text-[#7A85A3] w-20 shrink-0">{cat}</span>
+                      <div className="flex-1 h-2 rounded-full bg-[#EEF2FF] overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-[#1E3A8A]"
+                          style={{ width: `${Math.round((count / prayers.length) * 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-bold text-[#1E2A4A] w-6 text-right shrink-0">{count}</span>
+                    </div>
+                  ))}
+                  {prayers.length === 0 && <p className="text-sm text-[#9AA3BC]">No data yet.</p>}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── Pending ── */}
           {tab === "pending" && (
-            <motion.div key="pending" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
+            <motion.div key="pending" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <div>
+                <h2 className="text-xl font-bold text-[#1E2A4A]">Pending Review</h2>
+                <p className="text-[#7A85A3] text-sm mt-0.5">Approve or remove content before it goes public.</p>
+              </div>
               {pendingPrayers.length === 0 && pendingTestimonies.length === 0 ? (
                 <div className="text-center py-20 text-[#9AA3BC]">
                   <CheckCircle size={40} className="mx-auto mb-3 opacity-40" />
-                  <p className="font-medium">All caught up!</p>
+                  <p className="font-medium">All caught up! Nothing to review.</p>
                 </div>
               ) : (
                 <>
@@ -1403,10 +1554,13 @@ function AdminDashboard({
                             </div>
                             <p className="text-[#2D3A5E] text-sm leading-relaxed mb-4">{p.request}</p>
                             <div className="flex gap-2 flex-wrap">
+                              <motion.button whileTap={{ scale: 0.95 }} onClick={() => onApprovePrayer(p.id)} className="flex-1 h-9 rounded-lg bg-green-500 text-white text-xs font-semibold flex items-center justify-center gap-1 min-w-0">
+                                <Check size={12} /> Approve
+                              </motion.button>
                               <motion.button whileTap={{ scale: 0.95 }} onClick={() => onToggleUrgent(p.id)} className="h-9 px-3 rounded-lg bg-orange-100 text-orange-600 text-xs font-semibold flex items-center justify-center gap-1">
                                 <AlertTriangle size={12} /> Urgent
                               </motion.button>
-                              <motion.button whileTap={{ scale: 0.95 }} onClick={() => onRejectPrayer(p.id)} className="flex-1 h-9 rounded-lg bg-red-500 text-white text-xs font-semibold flex items-center justify-center gap-1 min-w-0">
+                              <motion.button whileTap={{ scale: 0.95 }} onClick={() => onRejectPrayer(p.id)} className="h-9 px-3 rounded-lg bg-red-100 text-red-500 text-xs font-semibold flex items-center justify-center gap-1">
                                 <X size={12} /> Delete
                               </motion.button>
                             </div>
@@ -1431,7 +1585,10 @@ function AdminDashboard({
                             </div>
                             <p className="text-[#2D3A5E] text-sm leading-relaxed mb-4">{t.text}</p>
                             <div className="flex gap-2">
-                              <motion.button whileTap={{ scale: 0.95 }} onClick={() => onRejectTestimony(t.id)} className="flex-1 h-9 rounded-lg bg-red-500 text-white text-xs font-semibold flex items-center justify-center gap-1">
+                              <motion.button whileTap={{ scale: 0.95 }} onClick={() => onApproveTestimony(t.id)} className="flex-1 h-9 rounded-lg bg-green-500 text-white text-xs font-semibold flex items-center justify-center gap-1">
+                                <Check size={12} /> Approve
+                              </motion.button>
+                              <motion.button whileTap={{ scale: 0.95 }} onClick={() => onRejectTestimony(t.id)} className="h-9 px-3 rounded-lg bg-red-100 text-red-500 text-xs font-semibold flex items-center justify-center gap-1">
                                 <X size={12} /> Delete
                               </motion.button>
                             </div>
@@ -1445,71 +1602,160 @@ function AdminDashboard({
             </motion.div>
           )}
 
-          {/* Approved */}
+          {/* ── Approved ── */}
           {tab === "approved" && (
-            <motion.div key="approved" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {approvedPrayers.map((p) => (
-                <div key={p.id} className="bg-white rounded-2xl p-5" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
-                  {p.urgent && (
-                    <div className="flex items-center gap-1 text-red-500 text-xs font-bold mb-2">
-                      <AlertTriangle size={11} /> Urgent
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="w-8 h-8 rounded-full bg-[#EEF2FF] flex items-center justify-center">
-                      <span className="text-xs font-bold text-[#1E3A8A]">{p.name[0]}</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <span className="font-semibold text-[#1E2A4A] text-sm">{p.name}</span>
-                      <span className="ml-2 text-xs text-[#1E3A8A] bg-[#EEF2FF] px-1.5 py-0.5 rounded-full">{p.category}</span>
-                    </div>
-                  </div>
-                  <p className="text-[#2D3A5E] text-xs leading-relaxed mb-3 line-clamp-3">{p.request}</p>
-                  <div className="flex items-center justify-between text-xs text-[#9AA3BC]">
-                    <div className="flex items-center gap-1">
-                      <Users size={11} /> {p.prayerCount} prayed
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <CheckCircle size={11} className="text-green-500" /> Live
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </motion.div>
-          )}
-
-          {/* Testimonies tab */}
-          {tab === "testimonies" && (
-            <motion.div key="testimonies" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {approvedTestimonies.map((t) => (
-                <div key={t.id} className="bg-white rounded-2xl p-5" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
-                  <Star size={13} className="text-[#1E3A8A] mb-2" />
-                  <p className="text-[#2D3A5E] text-sm leading-relaxed mb-3 line-clamp-4">{t.text}</p>
-                  <div className="flex items-center justify-between text-xs text-[#9AA3BC]">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-5 h-5 rounded-full bg-[#EEF2FF] flex items-center justify-center">
-                        <span className="text-[9px] font-bold text-[#1E3A8A]">{t.name[0]}</span>
+            <motion.div key="approved" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <div>
+                <h2 className="text-xl font-bold text-[#1E2A4A]">Approved Prayers</h2>
+                <p className="text-[#7A85A3] text-sm mt-0.5">{approvedPrayers.length} live prayer request{approvedPrayers.length !== 1 ? "s" : ""}.</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {approvedPrayers.map((p) => (
+                  <div key={p.id} className="bg-white rounded-2xl p-5" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
+                    {p.urgent && (
+                      <div className="flex items-center gap-1 text-red-500 text-xs font-bold mb-2">
+                        <AlertTriangle size={11} /> Urgent
                       </div>
-                      {t.name}
+                    )}
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-8 h-8 rounded-full bg-[#EEF2FF] flex items-center justify-center">
+                        <span className="text-xs font-bold text-[#1E3A8A]">{p.name[0]}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="font-semibold text-[#1E2A4A] text-sm">{p.name}</span>
+                        <span className="ml-2 text-xs text-[#1E3A8A] bg-[#EEF2FF] px-1.5 py-0.5 rounded-full">{p.category}</span>
+                      </div>
                     </div>
-                    <span>{t.daysAgo}d ago</span>
+                    <p className="text-[#2D3A5E] text-xs leading-relaxed mb-3 line-clamp-3">{p.request}</p>
+                    <div className="flex items-center justify-between text-xs text-[#9AA3BC]">
+                      <div className="flex items-center gap-1"><Users size={11} /> {p.prayerCount} prayed</div>
+                      <button onClick={() => onRejectPrayer(p.id)} className="text-red-400 hover:text-red-600 transition-colors">
+                        <X size={13} />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+                {approvedPrayers.length === 0 && <p className="text-sm text-[#9AA3BC] col-span-full text-center py-12">No approved prayers yet.</p>}
+              </div>
             </motion.div>
           )}
 
-          {/* Analytics */}
+          {/* ── Testimonies ── */}
+          {tab === "testimonies" && (
+            <motion.div key="testimonies" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <div>
+                <h2 className="text-xl font-bold text-[#1E2A4A]">Testimonies</h2>
+                <p className="text-[#7A85A3] text-sm mt-0.5">{approvedTestimonies.length} published testimon{approvedTestimonies.length !== 1 ? "ies" : "y"}.</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {approvedTestimonies.map((t) => (
+                  <div key={t.id} className="bg-white rounded-2xl p-5" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
+                    <Star size={13} className="text-amber-400 mb-2" />
+                    <p className="text-[#2D3A5E] text-sm leading-relaxed mb-3 line-clamp-4">{t.text}</p>
+                    <div className="flex items-center justify-between text-xs text-[#9AA3BC]">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-5 h-5 rounded-full bg-[#EEF2FF] flex items-center justify-center">
+                          <span className="text-[9px] font-bold text-[#1E3A8A]">{t.name[0]}</span>
+                        </div>
+                        {t.name}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span>{t.daysAgo}d ago</span>
+                        <button onClick={() => onRejectTestimony(t.id)} className="text-red-400 hover:text-red-600 transition-colors">
+                          <X size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {approvedTestimonies.length === 0 && <p className="text-sm text-[#9AA3BC] col-span-full text-center py-12">No testimonies yet.</p>}
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── Accounts ── */}
+          {tab === "accounts" && (
+            <motion.div key="accounts" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-[#1E2A4A]">Registered Accounts</h2>
+                  <p className="text-[#7A85A3] text-sm mt-0.5">{users.length} account{users.length !== 1 ? "s" : ""} in the system.</p>
+                </div>
+                <div className="relative max-w-xs w-full sm:w-auto">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9AA3BC]" />
+                  <input
+                    type="text"
+                    placeholder="Search by name or email..."
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    className="w-full h-10 pl-9 pr-4 rounded-xl bg-white border border-[#EEF2FF] text-sm text-[#1E2A4A] placeholder-[#9AA3BC] outline-none focus:ring-2 focus:ring-[#1E3A8A]/20"
+                  />
+                </div>
+              </div>
+
+              {filteredUsers.length === 0 ? (
+                <div className="text-center py-20 text-[#9AA3BC]">
+                  <Users size={36} className="mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">{users.length === 0 ? "No accounts created yet." : "No accounts match your search."}</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredUsers.map((user) => (
+                    <div key={user.id} className="bg-white rounded-2xl p-5" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.05)" }}>
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-12 h-12 rounded-full bg-[#EEF2FF] flex items-center justify-center text-lg font-bold text-[#1E3A8A] overflow-hidden shrink-0">
+                          {user.avatar ? (
+                            <img src={user.avatar} alt={user.name} className="h-full w-full object-cover" />
+                          ) : (
+                            user.name?.[0]?.toUpperCase() || "U"
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-[#1E2A4A] truncate">{user.name}</p>
+                          <p className="text-xs text-[#7A85A3] truncate">{user.email}</p>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5 mb-4 text-xs text-[#7A85A3]">
+                        <div className="flex items-center gap-2">
+                          <Phone size={12} className="shrink-0" />
+                          <span>{user.phone || "No phone number"}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <SparklesIcon size={12} className="shrink-0" />
+                          <span>Joined {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "—"}</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => onDeleteUser(user.id)}
+                        className="w-full h-8 rounded-lg bg-red-50 text-red-500 text-xs font-semibold hover:bg-red-100 transition-colors flex items-center justify-center gap-1"
+                      >
+                        <X size={12} /> Delete Account
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {/* ── Analytics ── */}
           {tab === "analytics" && (
-            <motion.div key="analytics" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <div className="space-y-5">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                  {[
-                    { label: "Answered Prayer Rate", value: `${approvedTestimonies.length}/${prayers.length}`, sub: "requests with testimonies", icon: TrendingUp, color: "text-green-500 bg-green-50" },
-                    { label: "Most Active Category", value: "Studies", sub: "based on prayer volume", icon: Star, color: "text-amber-500 bg-amber-50" },
-                    { label: "Total Community Prayers", value: totalPrayers.toLocaleString(), sub: "prayers offered across all requests", icon: HandHeart, color: "text-[#1E3A8A] bg-[#EEF2FF]" },
-                    { label: "Urgent Requests", value: prayers.filter((p) => p.urgent).length.toString(), sub: "flagged for urgent prayer", icon: AlertTriangle, color: "text-red-500 bg-red-50" },
-                  ].map((s) => {
+            <motion.div key="analytics" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+              <div>
+                <h2 className="text-xl font-bold text-[#1E2A4A]">Analytics</h2>
+                <p className="text-[#7A85A3] text-sm mt-0.5">Detailed metrics and engagement data.</p>
+              </div>
+
+              {/* metric cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                {[
+                  { label: "Answered Prayer Rate",   value: `${approvedTestimonies.length} / ${prayers.length}`,         sub: "requests with testimonies",          icon: TrendingUp,    color: "text-green-600 bg-green-50" },
+                  { label: "Most Active Category",   value: topCategory,                                                   sub: "by number of requests",               icon: Star,          color: "text-amber-500 bg-amber-50" },
+                  { label: "Community Prayer Total", value: totalPrayers.toLocaleString(),                                 sub: "prayers offered across all requests", icon: HandHeart,     color: "text-purple-600 bg-purple-50" },
+                  { label: "Urgent Requests",        value: prayers.filter((p) => p.urgent).length.toString(),            sub: "flagged for urgent prayer",           icon: AlertTriangle, color: "text-red-500 bg-red-50" },
+                  { label: "Approval Rate",          value: `${prayers.length ? Math.round((approvedPrayers.length / prayers.length) * 100) : 0}%`, sub: "requests approved vs submitted", icon: CheckCircle, color: "text-[#1E3A8A] bg-[#EEF2FF]" },
+                  { label: "Avg. Prayers per Request", value: prayers.length ? (totalPrayers / prayers.length).toFixed(1) : "0", sub: "average engagement per request", icon: Users, color: "text-emerald-600 bg-emerald-50" },
+                ].map((s) => {
                   const Icon = s.icon;
                   return (
                     <div key={s.label} className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
@@ -1521,48 +1767,65 @@ function AdminDashboard({
                       <p className="text-[#7A85A3] text-xs">{s.sub}</p>
                     </div>
                   );
-                  })}
-                </div>
+                })}
+              </div>
 
-                <div className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <p className="text-lg font-semibold text-[#1E2A4A]">Registered Users</p>
-                      <p className="text-sm text-[#7A85A3]">{users.length} total account{users.length === 1 ? "" : "s"}</p>
+              {/* category bar chart */}
+              <div className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
+                <p className="font-semibold text-[#1E2A4A] mb-5">Requests by Category</p>
+                <div className="space-y-4">
+                  {Object.entries(categoryMap).sort((a, b) => b[1] - a[1]).map(([cat, count]) => (
+                    <div key={cat} className="flex items-center gap-4">
+                      <span className="text-xs font-semibold text-[#7A85A3] w-20 shrink-0">{cat}</span>
+                      <div className="flex-1 h-3 rounded-full bg-[#EEF2FF] overflow-hidden">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${Math.round((count / prayers.length) * 100)}%` }}
+                          transition={{ duration: 0.6, ease: "easeOut" }}
+                          className="h-full rounded-full bg-[#1E3A8A]"
+                        />
+                      </div>
+                      <span className="text-xs font-bold text-[#1E2A4A] w-8 text-right shrink-0">{count}</span>
                     </div>
-                    <div className="w-10 h-10 rounded-xl bg-[#EEF2FF] flex items-center justify-center">
-                      <Users size={18} className="text-[#1E3A8A]" />
-                    </div>
-                  </div>
-                  {users.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {users.map((user) => (
-                        <div key={user.id} className="border border-[#EEF2FF] rounded-xl p-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-full bg-[#EEF2FF] flex items-center justify-center text-sm font-bold text-[#1E3A8A] overflow-hidden">
-                              {user.avatar ? (
-                                <img src={user.avatar} alt={user.name} className="h-full w-full object-cover" />
-                              ) : (
-                                user.name?.[0] || "U"
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="font-semibold text-[#1E2A4A] text-sm truncate">{user.name}</p>
-                              <p className="text-xs text-[#7A85A3] truncate">{user.email}</p>
-                              <p className="text-[11px] text-[#9AA3BC] mt-1">Owner: {user.name} · {user.phone || "No phone added"}</p>
-                            </div>
-                            <button onClick={() => onDeleteUser(user.id)} className="text-xs font-semibold text-red-500">Delete</button>
+                  ))}
+                  {prayers.length === 0 && <p className="text-sm text-[#9AA3BC]">No data yet.</p>}
+                </div>
+              </div>
+
+              {/* top prayers leaderboard */}
+              <div className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
+                <p className="font-semibold text-[#1E2A4A] mb-5">Top 5 Most Prayed Requests</p>
+                {topPrayers.length === 0 ? (
+                  <p className="text-sm text-[#9AA3BC]">No prayers recorded yet.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {topPrayers.map((p, i) => (
+                      <div key={p.id} className="flex items-center gap-4">
+                        <span className={cn(
+                          "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0",
+                          i === 0 ? "bg-amber-400 text-white" : i === 1 ? "bg-slate-300 text-[#1E2A4A]" : "bg-[#EEF2FF] text-[#7A85A3]"
+                        )}>{i + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-[#1E2A4A] truncate">{p.name}</p>
+                          <p className="text-xs text-[#7A85A3] truncate">{p.request}</p>
+                          <div className="mt-1.5 h-1.5 rounded-full bg-[#EEF2FF] overflow-hidden">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.round((p.prayerCount / (topPrayers[0]?.prayerCount || 1)) * 100)}%` }}
+                              transition={{ duration: 0.6, ease: "easeOut" }}
+                              className="h-full rounded-full bg-[#1E3A8A]"
+                            />
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-[#7A85A3]">No accounts created yet.</p>
-                  )}
-                </div>
+                        <span className="text-sm font-bold text-[#1E3A8A] shrink-0">{p.prayerCount}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
+
         </AnimatePresence>
       </div>
     </div>
@@ -1756,22 +2019,6 @@ export default function App() {
       )}
 
       {showNav && <TopNav active={navActive()} onNavigate={navigate} currentUser={currentUser} />}
-
-      {screen === "admin-dashboard" && (
-        <header className="bg-white border-b border-[#EEF2FF] sticky top-0 z-40">
-          <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
-            <button onClick={() => navigate("submit")} className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-[#EEF2FF] flex items-center justify-center overflow-hidden">
-                <ImageWithFallback src={prayingHandsLogo} alt="AY Prayerbox logo" className="w-7 h-7 object-contain" />
-              </div>
-              <span className="font-bold text-[#1E2A4A] text-lg">AY Prayerbox</span>
-            </button>
-            <span className="text-xs font-semibold text-[#1E3A8A] bg-[#EEF2FF] px-3 py-1.5 rounded-full flex items-center gap-1.5">
-              <Lock size={11} /> Leader Mode
-            </span>
-          </div>
-        </header>
-      )}
 
       <AnimatePresence mode="wait">
         <motion.div
