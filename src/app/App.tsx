@@ -499,7 +499,20 @@ function OfflineNotice({ message }: { message: string }) {
   );
 }
 
-function SettingsScreen({ onBack, onLogout }: { onBack: () => void; onLogout: () => void }) {
+function SettingsScreen({ onBack, onLogout, currentUser }: { onBack: () => void; onLogout: () => void; currentUser: AuthUser | null }) {
+  const [streakResetDone, setStreakResetDone] = useState(false);
+
+  const resetLocalPrayerData = () => {
+    try {
+      localStorage.removeItem("ayp_streak");
+      localStorage.removeItem("ayp_lastPrayer");
+      setStreakResetDone(true);
+      window.setTimeout(() => setStreakResetDone(false), 2000);
+    } catch {
+      setStreakResetDone(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#F5F6FA] flex items-center justify-center px-6 py-16">
       <div className="max-w-md w-full rounded-2xl bg-white p-7" style={{ boxShadow: "0 4px 24px rgba(30,58,138,0.08)" }}>
@@ -507,11 +520,38 @@ function SettingsScreen({ onBack, onLogout }: { onBack: () => void; onLogout: ()
           <Settings size={18} className="text-[#1E3A8A]" />
           <h2 className="text-xl font-bold text-[#1E2A4A]">Settings</h2>
         </div>
-        <div className="space-y-3 text-sm text-[#2D3A5E]">
-          <div className="rounded-xl bg-[#F5F6FA] p-3">Stay signed in on this device so you can return without re-entering your details.</div>
-          <div className="rounded-xl bg-[#F5F6FA] p-3">If you lose internet, Prayerbox will show a clear offline message while keeping the local experience available.</div>
-          <div className="rounded-xl bg-[#F5F6FA] p-3">Admins can view the account owner and delete accounts from the Leader Panel.</div>
+
+        <div className="space-y-4">
+          <div className="rounded-xl border border-[#EEF2FF] bg-[#F8FAFF] p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#7A85A3] mb-2">Account</p>
+            <p className="text-sm font-semibold text-[#1E2A4A]">{currentUser?.name || "Guest user"}</p>
+            <p className="text-xs text-[#7A85A3] mt-0.5">{currentUser?.email || "Sign in to manage account settings."}</p>
+            {currentUser?.role && (
+              <p className="text-xs text-[#1E3A8A] mt-2">Role: {currentUser.role}</p>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-[#EEF2FF] bg-white p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#7A85A3] mb-3">Security</p>
+            <div className="space-y-2 text-sm text-[#2D3A5E]">
+              <p>Session: You are signed in on this device.</p>
+              <p>Password: Managed securely by the AY Prayerbox backend.</p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[#EEF2FF] bg-white p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#7A85A3] mb-3">App Data</p>
+            <p className="text-sm text-[#2D3A5E] mb-3">Reset locally stored prayer streak information for this device.</p>
+            <button
+              onClick={resetLocalPrayerData}
+              className="h-9 px-3 rounded-lg bg-[#F5F6FA] text-[#1E2A4A] text-xs font-semibold hover:bg-[#EEF2FF] transition-colors"
+            >
+              Reset Prayer Streak Data
+            </button>
+            {streakResetDone && <p className="text-xs text-green-600 mt-2">Local streak data reset successfully.</p>}
+          </div>
         </div>
+
         <div className="mt-6 space-y-3">
           <OutlineButton onClick={onBack} className="w-full h-12 gap-2">
             <ArrowLeft size={14} /> Back
@@ -2385,7 +2425,7 @@ export default function App() {
               onBack={() => navigate("submit")}
             />
           )}
-          {screen === "settings" && <SettingsScreen onBack={() => navigate("submit")} onLogout={handleLogout} />}
+          {screen === "settings" && <SettingsScreen onBack={() => navigate("submit")} onLogout={handleLogout} currentUser={currentUser} />}
           {screen === "admin-login" && (
             <AdminLoginScreen
               onLogin={(user) => {
