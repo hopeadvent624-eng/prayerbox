@@ -78,12 +78,15 @@ const DAILY_VERSE = {
 };
 
 const CATEGORIES: Category[] = ["Personal", "Health", "Family", "Studies", "Ministry", "Other"];
-const ADMIN_EMAIL_FALLBACK = "prayerbox@gmail.com";
+const ADMIN_EMAIL_FALLBACKS = String(import.meta.env.VITE_ADMIN_EMAILS || "prayerbox@gmail.com")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
 
 function hasAdminAccess(user: AuthUser | null | undefined) {
   if (!user) return false;
   if (user.role === "admin") return true;
-  return String(user.email || "").trim().toLowerCase() === ADMIN_EMAIL_FALLBACK;
+  return ADMIN_EMAIL_FALLBACKS.includes(String(user.email || "").trim().toLowerCase());
 }
 
 // ─── Streak helpers ───────────────────────────────────────────────────────────
