@@ -78,6 +78,13 @@ const DAILY_VERSE = {
 };
 
 const CATEGORIES: Category[] = ["Personal", "Health", "Family", "Studies", "Ministry", "Other"];
+const ADMIN_EMAIL_FALLBACK = "prayerbox@gmail.com";
+
+function hasAdminAccess(user: AuthUser | null | undefined) {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  return String(user.email || "").trim().toLowerCase() === ADMIN_EMAIL_FALLBACK;
+}
 
 // ─── Streak helpers ───────────────────────────────────────────────────────────
 
@@ -1809,7 +1816,7 @@ function AdminLoginScreen({ onLogin, onBack }: { onLogin: (user: AuthUser) => vo
     setLoading(true);
     try {
       const result = await api.login(email.trim().toLowerCase(), password);
-      if (result.user.role !== "admin") {
+      if (!hasAdminAccess(result.user)) {
         setError("This account does not have admin access.");
         return;
       }
@@ -2739,7 +2746,7 @@ export default function App() {
   const [sharedPrayer, setSharedPrayer] = useState<{ name: string; request: string; category: Category } | null>(null);
   const [accountMode, setAccountMode] = useState<"signin" | "signup">("signin");
 
-  const isAdmin = currentUser?.role === "admin";
+  const isAdmin = hasAdminAccess(currentUser);
 
   const adminRestrictedScreens: Screen[] = [
     "splash",
@@ -2940,7 +2947,7 @@ export default function App() {
   const handleAuthSuccess = (user: AuthUser) => {
     setCurrentUser(user);
     setApiNotice("");
-    navigate(user.role === "admin" ? "admin-dashboard" : "submit");
+    navigate(hasAdminAccess(user) ? "admin-dashboard" : "submit");
   };
 
   const handleDeleteUser = async (id: number) => {
