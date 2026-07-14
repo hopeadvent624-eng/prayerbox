@@ -1618,7 +1618,7 @@ function TestimoniesScreen({ testimonies, onSubmit }: {
 
 // ─── Account / Auth ────────────────────────────────────────────────────────
 
-function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, onLogout, onBack }: {
+function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, onLogout, onBack, onOpenAdmin }: {
   currentUser: AuthUser | null;
   initialMode?: "signin" | "signup";
   onAuthenticated: (user: AuthUser) => void;
@@ -1731,6 +1731,7 @@ function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, o
                   Sign In
                 </button>
                 <button onClick={() => { setMode("signup"); setError(""); }} className={cn("h-10 rounded-lg text-sm font-semibold transition-colors", mode === "signup" ? "bg-white text-[#1E3A8A] shadow-sm" : "text-[#7A85A3]")}> 
+                  Create Account
                 </button>
               </div>
 
