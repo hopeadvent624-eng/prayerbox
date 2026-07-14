@@ -481,9 +481,12 @@ function SplashScreen({ onStart, onPray, prayers, testimonies }: {
       </section>
 
       <footer className="border-t border-[#EEF2FF] py-8">
-        <div className="max-w-5xl mx-auto px-6 text-center text-[#9AA3BC] text-xs flex items-center justify-center gap-1.5">
-          <BookOpen size={12} />
-          <span>James 5:16 — "Pray for one another." · Anonymous to public. </span>
+        <div className="max-w-5xl mx-auto px-6 text-center text-[#9AA3BC] text-xs space-y-1.5">
+          <div className="flex items-center justify-center gap-1.5">
+            <BookOpen size={12} />
+            <span>James 5:16 - "Pray for one another." - Anonymous to public.</span>
+          </div>
+          <p className="text-[11px] font-medium text-[#7A85A3]">Developed by Bluelinq Systems</p>
         </div>
       </footer>
     </div>
