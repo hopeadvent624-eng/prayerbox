@@ -1,11 +1,37 @@
 import { createServer } from "node:http";
 import { dirname, join, isAbsolute, basename } from "node:path";
 import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { randomBytes, scryptSync, timingSafeEqual, createHmac, createHash } from "node:crypto";
 import Database from "better-sqlite3";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function loadEnvFile(filePath) {
+  if (!existsSync(filePath)) return;
+  const content = readFileSync(filePath, "utf8");
+  for (const lineRaw of content.split(/\r?\n/)) {
+    const line = lineRaw.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    const separatorIndex = line.indexOf("=");
+    if (separatorIndex <= 0) continue;
+
+    const key = line.slice(0, separatorIndex).trim();
+    if (!key || Object.prototype.hasOwnProperty.call(process.env, key)) continue;
+
+    let value = line.slice(separatorIndex + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+
+    process.env[key] = value;
+  }
+}
+
+loadEnvFile(join(__dirname, "../.env"));
+
 const dbFile = process.env.DB_FILE
   ? isAbsolute(process.env.DB_FILE)
     ? process.env.DB_FILE

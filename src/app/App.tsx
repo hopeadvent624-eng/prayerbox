@@ -1847,7 +1847,6 @@ function AdminLoginScreen({ onLogin, onBack }: { onLogin: (user: AuthUser) => vo
           <PrimaryButton onClick={handleLogin} disabled={loading || !email.trim() || !password.trim()} className="w-full h-12 gap-2">
             <Lock size={14} /> {loading ? "Please wait..." : "Login"}
           </PrimaryButton>
-          <p className="text-center text-[#9AA3BC] text-xs">Default dev credentials: prayerbox@gmail.com / admin123</p>
           <button onClick={onBack} className="w-full text-center text-[#9AA3BC] text-sm hover:text-[#7A85A3] transition-colors flex items-center justify-center gap-1">
             <ArrowLeft size={13} /> Back
           </button>
