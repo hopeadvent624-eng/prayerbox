@@ -112,6 +112,55 @@ function cn(...classes: (string | undefined | false | null)[]) {
   return classes.filter(Boolean).join(" ");
 }
 
+type ThemeMode = "light" | "dark" | "system";
+type ColorTheme = "blue" | "emerald" | "amber";
+type FontSizeMode = "small" | "medium" | "large";
+
+type AppearanceSettings = {
+  themeMode: ThemeMode;
+  colorTheme: ColorTheme;
+  fontSize: FontSizeMode;
+  compactMode: boolean;
+};
+
+const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
+  themeMode: "system",
+  colorTheme: "blue",
+  fontSize: "medium",
+  compactMode: false,
+};
+
+function loadAppearanceSettings(): AppearanceSettings {
+  try {
+    const raw = localStorage.getItem("ayp_settings");
+    if (!raw) return DEFAULT_APPEARANCE_SETTINGS;
+    const parsed = JSON.parse(raw) as Partial<AppearanceSettings>;
+    return {
+      themeMode: parsed.themeMode === "light" || parsed.themeMode === "dark" || parsed.themeMode === "system" ? parsed.themeMode : "system",
+      colorTheme: parsed.colorTheme === "blue" || parsed.colorTheme === "emerald" || parsed.colorTheme === "amber" ? parsed.colorTheme : "blue",
+      fontSize: parsed.fontSize === "small" || parsed.fontSize === "medium" || parsed.fontSize === "large" ? parsed.fontSize : "medium",
+      compactMode: Boolean(parsed.compactMode),
+    };
+  } catch {
+    return DEFAULT_APPEARANCE_SETTINGS;
+  }
+}
+
+function applyAppearanceSettings(settings: AppearanceSettings) {
+  if (typeof document === "undefined") return;
+
+  const root = document.documentElement;
+  const darkPreferred = typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+  const useDark = settings.themeMode === "dark" || (settings.themeMode === "system" && darkPreferred);
+  root.classList.toggle("dark", Boolean(useDark));
+
+  const fontSizeValue = settings.fontSize === "small" ? "14px" : settings.fontSize === "large" ? "18px" : "16px";
+  root.style.setProperty("--font-size", fontSizeValue);
+
+  root.setAttribute("data-compact", settings.compactMode ? "true" : "false");
+  root.setAttribute("data-color-theme", settings.colorTheme);
+}
+
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 
 function PrimaryButton({ children, onClick, disabled, className }: {
@@ -504,11 +553,13 @@ function SettingsScreen({
   onLogout,
   currentUser,
   onUpdateCurrentUser,
+  onApplyAppearance,
 }: {
   onBack: () => void;
   onLogout: () => void;
   currentUser: AuthUser | null;
   onUpdateCurrentUser: (updates: Partial<AuthUser>) => void;
+  onApplyAppearance: (settings: AppearanceSettings) => void;
 }) {
   const [profileImage, setProfileImage] = useState(currentUser?.avatar || "");
   const [fullName, setFullName] = useState(currentUser?.name || "");
@@ -587,10 +638,26 @@ function SettingsScreen({
       if (typeof parsed.currency === "string") setCurrency(parsed.currency);
       if (typeof parsed.timeZone === "string") setTimeZone(parsed.timeZone);
       if (typeof parsed.dateFormat === "string") setDateFormat(parsed.dateFormat);
+
+      onApplyAppearance({
+        themeMode:
+          parsed.themeMode === "light" || parsed.themeMode === "dark" || parsed.themeMode === "system"
+            ? parsed.themeMode
+            : "system",
+        colorTheme:
+          parsed.colorTheme === "blue" || parsed.colorTheme === "emerald" || parsed.colorTheme === "amber"
+            ? parsed.colorTheme
+            : "blue",
+        fontSize:
+          parsed.fontSize === "small" || parsed.fontSize === "medium" || parsed.fontSize === "large"
+            ? parsed.fontSize
+            : "medium",
+        compactMode: typeof parsed.compactMode === "boolean" ? parsed.compactMode : false,
+      });
     } catch {
       // Ignore malformed local settings
     }
-  }, []);
+  }, [onApplyAppearance]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -616,6 +683,13 @@ function SettingsScreen({
   };
 
   const saveAllSettings = async () => {
+    const appearanceSettings: AppearanceSettings = {
+      themeMode,
+      colorTheme,
+      fontSize,
+      compactMode,
+    };
+
     try {
       localStorage.setItem(
         "ayp_settings",
@@ -645,6 +719,8 @@ function SettingsScreen({
     } catch {
       // ignore localStorage errors
     }
+
+    onApplyAppearance(appearanceSettings);
 
     try {
       const response = await api.updateProfile({
@@ -2661,6 +2737,10 @@ export default function App() {
     navigate("account");
   };
 
+  useEffect(() => {
+    applyAppearanceSettings(loadAppearanceSettings());
+  }, []);
+
   const syncOfflineFromBrowser = () => {
     if (typeof navigator !== "undefined") {
       setOffline(!navigator.onLine);
@@ -2905,6 +2985,7 @@ export default function App() {
               onUpdateCurrentUser={(updates) => {
                 setCurrentUser((prev) => (prev ? { ...prev, ...updates } : prev));
               }}
+              onApplyAppearance={applyAppearanceSettings}
             />
           )}
           {screen === "admin-login" && (

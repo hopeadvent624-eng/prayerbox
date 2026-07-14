@@ -41,6 +41,25 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
+:root[data-color-theme='blue'] {
+  --primary: #1e3a8a;
+  --ring: rgba(30, 58, 138, 0.35);
+}
+
+:root[data-color-theme='emerald'] {
+  --primary: #047857;
+  --ring: rgba(4, 120, 87, 0.35);
+}
+
+:root[data-color-theme='amber'] {
+  --primary: #b45309;
+  --ring: rgba(180, 83, 9, 0.35);
+}
+
+:root[data-compact='true'] {
+  --radius: 0.75rem;
+}
+
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
@@ -126,6 +145,10 @@
 
   body {
     @apply bg-background text-foreground;
+  }
+
+  :root[data-compact='true'] body {
+    line-height: 1.35;
   }
 
   /**
