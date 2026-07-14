@@ -2661,6 +2661,12 @@ export default function App() {
     navigate("account");
   };
 
+  const syncOfflineFromBrowser = () => {
+    if (typeof navigator !== "undefined") {
+      setOffline(!navigator.onLine);
+    }
+  };
+
   const refreshState = async () => {
     const state = await api.getState();
     setPrayers(state.prayers);
@@ -2671,6 +2677,14 @@ export default function App() {
   };
 
   useEffect(() => {
+    syncOfflineFromBrowser();
+
+    const handleOnline = () => setOffline(false);
+    const handleOffline = () => setOffline(true);
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
     if (api.getAuthToken()) {
       api.getCurrentUser()
         .then((result) => {
@@ -2683,9 +2697,18 @@ export default function App() {
     }
 
     refreshState().catch(() => {
-      setOffline(true);
-      setApiNotice("No internet connection. Showing the last available local experience.");
+      syncOfflineFromBrowser();
+      setApiNotice(
+        typeof navigator !== "undefined" && navigator.onLine
+          ? "Backend is unavailable. Connect this site to your API to enable live data."
+          : "No internet connection. Showing the last available local experience."
+      );
     });
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
   }, []);
 
   // Auto-refresh every 10 seconds while the admin dashboard is open
