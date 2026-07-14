@@ -1624,6 +1624,7 @@ function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, o
   onAuthenticated: (user: AuthUser) => void;
   onLogout: () => void;
   onBack: () => void;
+  onOpenAdmin: () => void;
 }) {
   const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [name, setName] = useState("");
@@ -1775,6 +1776,10 @@ function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, o
               <PrimaryButton onClick={handleSubmit} disabled={loading || !email.trim() || !password.trim() || (mode === "signup" && !name.trim())} className="w-full h-12 gap-2">
                 {loading ? "Please wait..." : mode === "signup" ? "Create Account" : "Sign In"}
               </PrimaryButton>
+
+              <OutlineButton onClick={onOpenAdmin} className="w-full h-11 gap-2">
+                <Lock size={14} /> Admin Login
+              </OutlineButton>
             </>
           )}
 
@@ -1838,10 +1843,10 @@ function AdminLoginScreen({ onLogin, onBack }: { onLogin: (user: AuthUser) => vo
           <PrimaryButton onClick={handleLogin} disabled={loading || !email.trim() || !password.trim()} className="w-full h-12 gap-2">
             <Lock size={14} /> {loading ? "Please wait..." : "Login"}
           </PrimaryButton>
+          <p className="text-center text-[#9AA3BC] text-xs">Default dev credentials: prayerbox@gmail.com / admin123</p>
           <button onClick={onBack} className="w-full text-center text-[#9AA3BC] text-sm hover:text-[#7A85A3] transition-colors flex items-center justify-center gap-1">
             <ArrowLeft size={13} /> Back
           </button>
-          <p className="text-center text-[#9AA3BC] text-xs"></p>
         </div>
       </div>
     </div>
@@ -3012,6 +3017,7 @@ export default function App() {
               onAuthenticated={handleAuthSuccess}
               onLogout={handleLogout}
               onBack={() => navigate("submit")}
+              onOpenAdmin={() => navigate("admin-login")}
             />
           )}
           {screen === "settings" && (

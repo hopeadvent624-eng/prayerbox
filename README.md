@@ -20,6 +20,17 @@
   On first run, the API migrates legacy data from `server/data.json` if present.
   User passwords are stored as secure scrypt hashes, and legacy plain-text passwords are auto-migrated on startup.
 
+  ## Admin Login (Development)
+
+  Default admin credentials:
+  - Email: `prayerbox@gmail.com`
+  - Password: `admin123`
+
+  These are enforced by the fixed admin account on API startup and can be changed in `.env`:
+  - `FIXED_ADMIN_ENABLED`
+  - `FIXED_ADMIN_EMAIL`
+  - `FIXED_ADMIN_PASSWORD`
+
   ## Production Checklist
 
   1. Set `NODE_ENV=production`.
