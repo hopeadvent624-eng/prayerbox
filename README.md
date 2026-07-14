@@ -33,6 +33,9 @@
 
   ## Production Checklist
 
+  Full step-by-step deployment and admin auth alignment guide:
+  - See `PRODUCTION_DEPLOY_CHECKLIST.md`
+
   1. Set `NODE_ENV=production`.
   2. Set a strong `SESSION_SECRET`.
   3. Configure short-lived access and longer-lived refresh tokens (`AUTH_ACCESS_TOKEN_TTL_SECONDS`, `AUTH_REFRESH_TOKEN_TTL_SECONDS`).

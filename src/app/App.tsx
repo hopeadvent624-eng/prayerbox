@@ -47,7 +47,6 @@ type Screen =
   | "testimonies"
   | "account"
   | "settings"
-  | "admin-login"
   | "admin-dashboard";
 
 // ─── Static data ──────────────────────────────────────────────────────────────
@@ -1631,13 +1630,12 @@ function TestimoniesScreen({ testimonies, onSubmit }: {
 
 // ─── Account / Auth ────────────────────────────────────────────────────────
 
-function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, onLogout, onBack, onOpenAdmin }: {
+function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, onLogout, onBack }: {
   currentUser: AuthUser | null;
   initialMode?: "signin" | "signup";
   onAuthenticated: (user: AuthUser) => void;
   onLogout: () => void;
   onBack: () => void;
-  onOpenAdmin: () => void;
 }) {
   const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [name, setName] = useState("");
@@ -1790,73 +1788,9 @@ function AccountScreen({ currentUser, initialMode = "signin", onAuthenticated, o
               <PrimaryButton onClick={handleSubmit} disabled={loading || !email.trim() || !password.trim() || (mode === "signup" && !name.trim())} className="w-full h-12 gap-2">
                 {loading ? "Please wait..." : mode === "signup" ? "Create Account" : "Sign In"}
               </PrimaryButton>
-
-              <OutlineButton onClick={onOpenAdmin} className="w-full h-11 gap-2">
-                <Lock size={14} /> Admin Login
-              </OutlineButton>
             </>
           )}
 
-          <button onClick={onBack} className="w-full text-center text-[#9AA3BC] text-sm hover:text-[#7A85A3] transition-colors flex items-center justify-center gap-1">
-            <ArrowLeft size={13} /> Back
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Admin Login ──────────────────────────────────────────────────────────────
-
-function AdminLoginScreen({ onLogin, onBack }: { onLogin: (user: AuthUser) => void; onBack: () => void }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const handleLogin = async () => {
-    setError("");
-    setLoading(true);
-    try {
-      const result = await api.login(email.trim().toLowerCase(), password);
-      if (!hasAdminAccess(result.user)) {
-        setError("This account does not have admin access.");
-        return;
-      }
-      onLogin(result.user);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to sign in.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-[#F5F6FA] flex items-center justify-center px-6">
-      <div className="max-w-sm w-full">
-        <div className="text-center mb-8">
-          <div className="w-20 h-20 rounded-2xl bg-white flex items-center justify-center mx-auto mb-5" style={{ boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
-            <Lock size={32} className="text-[#1E3A8A]" strokeWidth={1.5} />
-          </div>
-          <h2 className="text-2xl font-bold text-[#1E2A4A]">Admin Login</h2>
-          <p className="text-[#9AA3BC] text-sm mt-1">Authorized Developers Only</p>
-        </div>
-
-        <div className="bg-white rounded-2xl p-7 space-y-4" style={{ boxShadow: "0 4px 24px rgba(30,58,138,0.08)" }}>
-          <div className="rounded-xl overflow-hidden">
-            <TextInput type="email" placeholder="Admin email" value={email} onChange={setEmail} />
-          </div>
-          <div className={cn("rounded-xl overflow-hidden", Boolean(error) && "ring-2 ring-red-400")}>
-            <TextInput type="password" placeholder="Password" value={password} onChange={setPassword} />
-          </div>
-          {error && (
-            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-red-400 text-xs text-center flex items-center justify-center gap-1">
-              <X size={12} /> {error}
-            </motion.p>
-          )}
-          <PrimaryButton onClick={handleLogin} disabled={loading || !email.trim() || !password.trim()} className="w-full h-12 gap-2">
-            <Lock size={14} /> {loading ? "Please wait..." : "Login"}
-          </PrimaryButton>
           <button onClick={onBack} className="w-full text-center text-[#9AA3BC] text-sm hover:text-[#7A85A3] transition-colors flex items-center justify-center gap-1">
             <ArrowLeft size={13} /> Back
           </button>
@@ -2761,7 +2695,6 @@ export default function App() {
     "testimonies",
     "account",
     "settings",
-    "admin-login",
   ];
 
   const navigate = (s: Screen) => {
@@ -2980,7 +2913,7 @@ export default function App() {
     return "";
   };
 
-  const showNav = !isAdmin && !["splash", "onboarding", "admin-login", "admin-dashboard", "account", "settings", "share"].includes(screen);
+  const showNav = !isAdmin && !["splash", "onboarding", "admin-dashboard", "account", "settings", "share"].includes(screen);
 
   return (
     <div className="min-h-screen bg-background font-['Inter',sans-serif]">
@@ -3030,7 +2963,6 @@ export default function App() {
               onAuthenticated={handleAuthSuccess}
               onLogout={handleLogout}
               onBack={() => navigate("submit")}
-              onOpenAdmin={() => navigate("admin-login")}
             />
           )}
           {screen === "settings" && (
@@ -3042,17 +2974,6 @@ export default function App() {
                 setCurrentUser((prev) => (prev ? { ...prev, ...updates } : prev));
               }}
               onApplyAppearance={applyAppearanceSettings}
-            />
-          )}
-          {screen === "admin-login" && (
-            <AdminLoginScreen
-              onLogin={(user) => {
-                setCurrentUser(user);
-                setApiNotice("");
-                navigate("admin-dashboard");
-                refreshState().catch(() => {});
-              }}
-              onBack={() => navigate("submit")}
             />
           )}
           {screen === "admin-dashboard" && (
