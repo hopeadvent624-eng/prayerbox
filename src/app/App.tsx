@@ -2731,7 +2731,28 @@ export default function App() {
   const [sharedPrayer, setSharedPrayer] = useState<{ name: string; request: string; category: Category } | null>(null);
   const [accountMode, setAccountMode] = useState<"signin" | "signup">("signin");
 
-  const navigate = (s: Screen) => setScreen(s);
+  const isAdmin = currentUser?.role === "admin";
+
+  const adminRestrictedScreens: Screen[] = [
+    "splash",
+    "onboarding",
+    "submit",
+    "success",
+    "share",
+    "pray",
+    "testimonies",
+    "account",
+    "settings",
+    "admin-login",
+  ];
+
+  const navigate = (s: Screen) => {
+    if (isAdmin && adminRestrictedScreens.includes(s)) {
+      setScreen("admin-dashboard");
+      return;
+    }
+    setScreen(s);
+  };
   const openAccount = (mode: "signin" | "signup") => {
     setAccountMode(mode);
     navigate("account");
@@ -2812,7 +2833,18 @@ export default function App() {
     }
   }, [currentUser]);
 
+  useEffect(() => {
+    if (isAdmin && screen !== "admin-dashboard") {
+      setScreen("admin-dashboard");
+    }
+  }, [isAdmin, screen]);
+
   const handleSubmitPrayer = async (name: string, request: string, category: Category) => {
+    if (isAdmin) {
+      setApiNotice("Admin accounts cannot submit prayer requests.");
+      navigate("admin-dashboard");
+      return;
+    }
     setSharedPrayer({ name, request, category });
     try {
       await api.submitPrayer(name, request, category);
@@ -2839,6 +2871,11 @@ export default function App() {
   };
 
   const handleSubmitTestimony = async (name: string, text: string) => {
+    if (isAdmin) {
+      setApiNotice("Admin accounts cannot submit testimonies.");
+      navigate("admin-dashboard");
+      return;
+    }
     try {
       await api.submitTestimony(name, text);
       await refreshState();
@@ -2925,7 +2962,7 @@ export default function App() {
     return "";
   };
 
-  const showNav = !["splash", "onboarding", "admin-login", "admin-dashboard", "account", "settings", "share"].includes(screen);
+  const showNav = !isAdmin && !["splash", "onboarding", "admin-login", "admin-dashboard", "account", "settings", "share"].includes(screen);
 
   return (
     <div className="min-h-screen bg-background font-['Inter',sans-serif]">
@@ -2951,7 +2988,7 @@ export default function App() {
           exit={{ opacity: 0, y: -12 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
         >
-          {screen === "splash" && (showSplash ? <SplashLoadingScreen onFinish={() => { setShowSplash(false); navigate(currentUser ? "submit" : "onboarding"); }} /> : <SplashScreen onStart={() => navigate("submit")} onPray={() => navigate("pray")} prayers={prayers} testimonies={testimonies} />)}
+          {screen === "splash" && (showSplash ? <SplashLoadingScreen onFinish={() => { setShowSplash(false); navigate(isAdmin ? "admin-dashboard" : currentUser ? "submit" : "onboarding"); }} /> : <SplashScreen onStart={() => navigate("submit")} onPray={() => navigate("pray")} prayers={prayers} testimonies={testimonies} />)}
           {screen === "onboarding" && <OnboardingScreen onCreateAccount={() => openAccount("signup")} onLogin={() => openAccount("signin")} onSkip={() => navigate("submit")} />}
           {screen === "submit" && <SubmitScreen onSubmit={handleSubmitPrayer} defaultName={currentUser?.name?.split(" ")[0]} />}
           {screen === "success" && <SuccessScreen onPray={() => navigate("pray")} />}
@@ -3010,7 +3047,7 @@ export default function App() {
               onApproveTestimony={(id) => updateTestimony(id, { approved: true })}
               onRejectTestimony={deleteTestimony}
               onDeleteUser={handleDeleteUser}
-              onLogout={() => navigate("submit")}
+              onLogout={handleLogout}
             />
           )}
         </motion.div>
