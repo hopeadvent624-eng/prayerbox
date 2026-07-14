@@ -159,6 +159,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (CONFIGURED_API_BASE_URL) {
     urls.push(`${CONFIGURED_API_BASE_URL}${path}`);
   }
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if ((host === "localhost" || host === "127.0.0.1") && !urls.includes(`http://localhost:4000${path}`)) {
+      urls.push(`http://localhost:4000${path}`);
+    }
+  }
   urls.push(path);
 
   let lastError: Error | undefined;
@@ -195,6 +201,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       }
 
       if (response.status === 404 && index === 0 && urls.length > 1) {
+        continue;
+      }
+
+      // If login fails on one backend, try the next candidate URL before failing.
+      if (path === "/api/auth/login" && response.status === 401 && index < urls.length - 1) {
         continue;
       }
 
