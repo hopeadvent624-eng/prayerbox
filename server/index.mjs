@@ -59,6 +59,9 @@ const SCRYPT_KEYLEN = 64;
 const TOKEN_KIND_ACCESS = "access";
 const TOKEN_KIND_REFRESH = "refresh";
 const ACCOUNT_ACTION_TOKEN_TTL_MINUTES = Number(process.env.ACCOUNT_ACTION_TOKEN_TTL_MINUTES || 15);
+const FIXED_ADMIN_ENABLED = String(process.env.FIXED_ADMIN_ENABLED || "true").trim().toLowerCase() !== "false";
+const FIXED_ADMIN_EMAIL = String(process.env.FIXED_ADMIN_EMAIL || "prayerbox@gmail.com").trim().toLowerCase();
+const FIXED_ADMIN_PASSWORD = String(process.env.FIXED_ADMIN_PASSWORD || "admin123").trim();
 
 function base64UrlEncode(value) {
   return Buffer.from(value)
@@ -599,6 +602,31 @@ function syncAdminRoles() {
   });
 
   tx();
+}
+
+function ensureFixedAdminAccount() {
+  if (!FIXED_ADMIN_ENABLED) return;
+
+  const email = FIXED_ADMIN_EMAIL.toLowerCase();
+  if (!email || !FIXED_ADMIN_PASSWORD) return;
+
+  const nowIso = new Date().toISOString();
+  const passwordHash = hashPassword(FIXED_ADMIN_PASSWORD);
+
+  const existing = db
+    .prepare("SELECT id FROM users WHERE lower(email) = ?")
+    .get(email);
+
+  if (existing?.id) {
+    db.prepare(
+      "UPDATE users SET role = 'admin', accountStatus = 'active', password = ? WHERE id = ?"
+    ).run(passwordHash, Number(existing.id));
+    return;
+  }
+
+  db.prepare(
+    "INSERT INTO users (name, username, email, phone, avatar, bio, password, role, accountStatus, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, 'admin', 'active', ?)"
+  ).run("Prayerbox Admin", "prayerbox_admin", email, "", "", "", passwordHash, nowIso);
 }
 
 function purgeExpiredSessions() {
@@ -1376,6 +1404,7 @@ ensureSchemaMigrations();
 await migrateLegacyJson();
 migrateLegacyPlaintextPasswords();
 syncAdminRoles();
+ensureFixedAdminAccount();
 purgeExpiredSessions();
 purgeExpiredActionTokens();
 scheduleBackupsIfEnabled();
