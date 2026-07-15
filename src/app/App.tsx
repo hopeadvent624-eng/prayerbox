@@ -31,7 +31,7 @@ import {
   Search,
 } from "lucide-react";
 import { api } from "./lib/api";
-import type { AuthSession, AuthUser, Category, PrayerRequest, Testimony } from "./lib/api";
+import type { AuthSession, AuthUser, Category, PrayerRequest, PrayerboxState, Testimony } from "./lib/api";
 // @ts-ignore: Ignore missing type declarations for image import
 import prayingHandsLogo from "../imports/Asset_1.png";
 
@@ -81,6 +81,133 @@ const ADMIN_EMAIL_FALLBACKS = String(import.meta.env.VITE_ADMIN_EMAILS || "praye
   .split(",")
   .map((email) => email.trim().toLowerCase())
   .filter(Boolean);
+const PENDING_PRAYERS_KEY = "ayp_pendingPrayers";
+const PENDING_TESTIMONIES_KEY = "ayp_pendingTestimonies";
+
+type PendingPrayer = {
+  localId: number;
+  name: string;
+  request: string;
+  category: Category;
+  createdAt: string;
+};
+
+type PendingTestimony = {
+  localId: number;
+  name: string;
+  text: string;
+  category: Category;
+  createdAt: string;
+};
+
+function createLocalId() {
+  return -(Date.now() + Math.floor(Math.random() * 1000));
+}
+
+function normalizeFingerprintValue(value: string) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function prayerFingerprint(name: string, request: string, category: Category) {
+  return `${normalizeFingerprintValue(name)}|${normalizeFingerprintValue(request)}|${category}`;
+}
+
+function testimonyFingerprint(name: string, text: string, category: Category) {
+  return `${normalizeFingerprintValue(name)}|${normalizeFingerprintValue(text)}|${category}`;
+}
+
+function isValidCategory(value: unknown): value is Category {
+  return typeof value === "string" && CATEGORIES.includes(value as Category);
+}
+
+function loadPendingPrayers(): PendingPrayer[] {
+  try {
+    const raw = localStorage.getItem(PENDING_PRAYERS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const name = String((item as Record<string, unknown>).name || "").trim();
+        const request = String((item as Record<string, unknown>).request || "").trim();
+        const category = (item as Record<string, unknown>).category;
+        const localId = Number((item as Record<string, unknown>).localId);
+        const createdAt = String((item as Record<string, unknown>).createdAt || "");
+
+        if (!name || !request || !isValidCategory(category) || !Number.isFinite(localId)) return null;
+        return { localId, name, request, category, createdAt: createdAt || new Date().toISOString() };
+      })
+      .filter((item): item is PendingPrayer => Boolean(item));
+  } catch {
+    return [];
+  }
+}
+
+function savePendingPrayers(prayers: PendingPrayer[]) {
+  try {
+    localStorage.setItem(PENDING_PRAYERS_KEY, JSON.stringify(prayers));
+  } catch {
+    // ignore localStorage errors
+  }
+}
+
+function loadPendingTestimonies(): PendingTestimony[] {
+  try {
+    const raw = localStorage.getItem(PENDING_TESTIMONIES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const name = String((item as Record<string, unknown>).name || "").trim();
+        const text = String((item as Record<string, unknown>).text || "").trim();
+        const category = (item as Record<string, unknown>).category;
+        const localId = Number((item as Record<string, unknown>).localId);
+        const createdAt = String((item as Record<string, unknown>).createdAt || "");
+
+        if (!name || !text || !isValidCategory(category) || !Number.isFinite(localId)) return null;
+        return { localId, name, text, category, createdAt: createdAt || new Date().toISOString() };
+      })
+      .filter((item): item is PendingTestimony => Boolean(item));
+  } catch {
+    return [];
+  }
+}
+
+function savePendingTestimonies(testimonies: PendingTestimony[]) {
+  try {
+    localStorage.setItem(PENDING_TESTIMONIES_KEY, JSON.stringify(testimonies));
+  } catch {
+    // ignore localStorage errors
+  }
+}
+
+function pendingPrayerToPrayerRequest(item: PendingPrayer): PrayerRequest {
+  return {
+    id: item.localId,
+    name: item.name,
+    request: item.request,
+    category: item.category,
+    prayerCount: 0,
+    approved: true,
+  };
+}
+
+function pendingTestimonyToTestimony(item: PendingTestimony): Testimony {
+  return {
+    id: item.localId,
+    name: item.name,
+    text: item.text,
+    category: item.category,
+    daysAgo: 0,
+    prayerCount: 0,
+    approved: true,
+  };
+}
 
 function hasAdminAccess(user: AuthUser | null | undefined) {
   if (!user) return false;
@@ -2667,8 +2794,14 @@ function AdminDashboard({
 export default function App() {
   const [screen, setScreen] = useState<Screen>("splash");
   const [showSplash, setShowSplash] = useState(true);
-  const [prayers, setPrayers] = useState<PrayerRequest[]>(INITIAL_PRAYERS);
-  const [testimonies, setTestimonies] = useState<Testimony[]>(INITIAL_TESTIMONIES);
+  const [prayers, setPrayers] = useState<PrayerRequest[]>(() => [
+    ...INITIAL_PRAYERS,
+    ...loadPendingPrayers().map(pendingPrayerToPrayerRequest),
+  ]);
+  const [testimonies, setTestimonies] = useState<Testimony[]>(() => [
+    ...INITIAL_TESTIMONIES,
+    ...loadPendingTestimonies().map(pendingTestimonyToTestimony),
+  ]);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
     try {
       const saved = localStorage.getItem("ayp_currentUser");
@@ -2719,12 +2852,106 @@ export default function App() {
     }
   };
 
+  const getMergedState = (state: PrayerboxState) => {
+    const prayerSignatures = new Set(
+      state.prayers.map((prayer) => prayerFingerprint(prayer.name, prayer.request, prayer.category))
+    );
+    const testimonySignatures = new Set(
+      state.testimonies.map((testimony) => testimonyFingerprint(testimony.name, testimony.text, testimony.category))
+    );
+
+    const pendingPrayers = loadPendingPrayers().filter(
+      (item) => !prayerSignatures.has(prayerFingerprint(item.name, item.request, item.category))
+    );
+    const pendingTestimonies = loadPendingTestimonies().filter(
+      (item) => !testimonySignatures.has(testimonyFingerprint(item.name, item.text, item.category))
+    );
+
+    savePendingPrayers(pendingPrayers);
+    savePendingTestimonies(pendingTestimonies);
+
+    return {
+      prayers: [...state.prayers, ...pendingPrayers.map(pendingPrayerToPrayerRequest)],
+      testimonies: [...state.testimonies, ...pendingTestimonies.map(pendingTestimonyToTestimony)],
+      users: Array.isArray(state.users) ? state.users : [],
+      pendingPrayerCount: pendingPrayers.length,
+      pendingTestimonyCount: pendingTestimonies.length,
+    };
+  };
+
+  const syncPendingQueue = async () => {
+    let pendingPrayers = loadPendingPrayers();
+    let pendingTestimonies = loadPendingTestimonies();
+    let prayersSynced = 0;
+    let testimoniesSynced = 0;
+
+    if (pendingPrayers.length > 0) {
+      const remaining: PendingPrayer[] = [];
+      for (const item of pendingPrayers) {
+        try {
+          await api.submitPrayer(item.name, item.request, item.category);
+          prayersSynced += 1;
+        } catch {
+          remaining.push(item);
+        }
+      }
+      pendingPrayers = remaining;
+      savePendingPrayers(pendingPrayers);
+    }
+
+    if (pendingTestimonies.length > 0) {
+      const remaining: PendingTestimony[] = [];
+      for (const item of pendingTestimonies) {
+        try {
+          await api.submitTestimony(item.name, item.text);
+          testimoniesSynced += 1;
+        } catch {
+          remaining.push(item);
+        }
+      }
+      pendingTestimonies = remaining;
+      savePendingTestimonies(pendingTestimonies);
+    }
+
+    return {
+      prayersSynced,
+      testimoniesSynced,
+      remainingPrayerCount: pendingPrayers.length,
+      remainingTestimonyCount: pendingTestimonies.length,
+    };
+  };
+
   const refreshState = async () => {
+    let syncNotice = "";
     const state = await api.getState();
-    setPrayers(state.prayers);
-    setTestimonies(state.testimonies);
-    setUsers(Array.isArray(state.users) ? state.users : []);
-    setApiNotice("");
+    const merged = getMergedState(state);
+    setPrayers(merged.prayers);
+    setTestimonies(merged.testimonies);
+    setUsers(merged.users);
+
+    if (merged.pendingPrayerCount > 0 || merged.pendingTestimonyCount > 0) {
+      const synced = await syncPendingQueue();
+      if (synced.prayersSynced > 0 || synced.testimoniesSynced > 0) {
+        const refreshed = await api.getState();
+        const refreshedMerged = getMergedState(refreshed);
+        setPrayers(refreshedMerged.prayers);
+        setTestimonies(refreshedMerged.testimonies);
+        setUsers(refreshedMerged.users);
+
+        const parts: string[] = [];
+        if (synced.prayersSynced > 0) {
+          parts.push(`${synced.prayersSynced} prayer request${synced.prayersSynced === 1 ? "" : "s"}`);
+        }
+        if (synced.testimoniesSynced > 0) {
+          parts.push(`${synced.testimoniesSynced} testimon${synced.testimoniesSynced === 1 ? "y" : "ies"}`);
+        }
+        if (parts.length > 0) {
+          syncNotice = `Synced ${parts.join(" and ")} saved while offline.`;
+        }
+      }
+    }
+
+    setApiNotice(syncNotice);
     setOffline(false);
   };
 
@@ -2801,8 +3028,18 @@ export default function App() {
       await api.submitPrayer(name, request, category);
       await refreshState();
     } catch {
-      setPrayers((prev) => [...prev, { id: Date.now(), name, request, category, prayerCount: 0, approved: true }]);
-      setApiNotice("Backend offline - saved only in this browser session.");
+      const pendingPrayer: PendingPrayer = {
+        localId: createLocalId(),
+        name,
+        request,
+        category,
+        createdAt: new Date().toISOString(),
+      };
+      const pending = loadPendingPrayers();
+      pending.push(pendingPrayer);
+      savePendingPrayers(pending);
+      setPrayers((prev) => [...prev, pendingPrayerToPrayerRequest(pendingPrayer)]);
+      setApiNotice("Backend offline - saved on this device and will auto-sync when backend is reachable.");
     }
     navigate("share");
   };
@@ -2831,8 +3068,18 @@ export default function App() {
       await api.submitTestimony(name, text);
       await refreshState();
     } catch {
-      setTestimonies((prev) => [...prev, { id: Date.now(), name, text, category: "Personal", daysAgo: 0, prayerCount: 0, approved: true }]);
-      setApiNotice("Backend offline - saved only in this browser session.");
+      const pendingTestimony: PendingTestimony = {
+        localId: createLocalId(),
+        name,
+        text,
+        category: "Personal",
+        createdAt: new Date().toISOString(),
+      };
+      const pending = loadPendingTestimonies();
+      pending.push(pendingTestimony);
+      savePendingTestimonies(pending);
+      setTestimonies((prev) => [...prev, pendingTestimonyToTestimony(pendingTestimony)]);
+      setApiNotice("Backend offline - saved on this device and will auto-sync when backend is reachable.");
     }
   };
 
