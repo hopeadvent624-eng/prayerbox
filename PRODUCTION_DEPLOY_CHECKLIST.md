@@ -15,38 +15,45 @@ Set these in your Render service:
 - `ADMIN_EMAILS=prayerbox@gmail.com,asher@gmail.com,bluelinq.admin@gmail.com`
 - `FIXED_ADMIN_ENABLED=true`
 - `FIXED_ADMIN_EMAIL=prayerbox@gmail.com`
-- `FIXED_ADMIN_PASSWORD=admin123`
+- `FIXED_ADMIN_PASSWORD=<strong-random-admin-password>`
 - `DB_FILE=server/data.sqlite` (or your persistent disk path)
 - `BACKUP_DIR=server/backups`
 - `BACKUP_RETENTION_COUNT=14`
-- `BACKUP_INTERVAL_MINUTES=0`
+- `BACKUP_INTERVAL_MINUTES=60`
 
 Notes:
+
 - `ADMIN_EMAILS` controls who has admin role.
 - `FIXED_ADMIN_*` guarantees one known admin account exists after startup.
 - Use persistent disk/storage for SQLite in production.
+- Set `BACKUP_INTERVAL_MINUTES` to a positive value and verify backup files are retained.
+- Production startup rejects the default admin password, missing session secret, or missing CORS origins.
 
 ## 2) Backend Code Version Alignment
 
 Ensure Render is running the same backend version as local.
 
 Confirm these features exist in deployed backend:
+
 - `role` support on users
 - fixed admin account sync on startup
 - modern auth response including role metadata
 
 If Render is behind local code:
+
 - push latest backend changes
 - redeploy Render service
 
 ## 3) Frontend (Netlify) - API Routing
 
 Your current [netlify.toml](netlify.toml) proxies API requests to:
+
 - `https://prayerbox-api.onrender.com/api/:splat`
 
 This is valid if Render is your backend source of truth.
 
 Also set Netlify env vars:
+
 - `VITE_API_BASE_URL=` (empty if using Netlify `/api/*` redirect)
 - `VITE_ADMIN_EMAILS=prayerbox@gmail.com,asher@gmail.com,bluelinq.admin@gmail.com`
 
@@ -61,11 +68,13 @@ After deploy, verify on production API:
 3. Confirm admin user lands on admin dashboard in frontend.
 
 Suggested accounts:
-- `prayerbox@gmail.com / admin123`
-- `asher@gmail.com / admin123`
-- `bluelinq.admin@gmail.com / Admin@12345`
+
+- `prayerbox@gmail.com / <configured-production-password>`
+- `asher@gmail.com / <configured-production-password>`
+- `bluelinq.admin@gmail.com / <configured-production-password>`
 
 If an account fails online but works locally:
+
 - Render DB likely does not contain that user yet, or
 - Render env (`ADMIN_EMAILS`) does not include that email.
 
@@ -76,6 +85,7 @@ If needed, create missing admin users on production backend by registering them 
 ## 6) Final Smoke Test
 
 Run these checks on the live site:
+
 - Normal user login works
 - Admin login through normal login page opens admin dashboard
 - Admin cannot submit prayers/testimonies
@@ -85,10 +95,13 @@ Run these checks on the live site:
 ## 7) Common Failure Pattern
 
 Symptom:
+
 - local works, online fails with "Invalid email or password" or "no admin access"
 
 Cause:
+
 - frontend deployed to Netlify points to Render backend with different DB/env than local
 
 Fix:
+
 - align Render env vars + deployed backend version + production database users

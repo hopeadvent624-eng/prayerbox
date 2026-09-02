@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import { readFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { randomBytes, scryptSync, timingSafeEqual, createHmac, createHash } from "node:crypto";
-import Database from "better-sqlite3";
+import { createDbClient } from "./db-client.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -37,6 +37,7 @@ const dbFile = process.env.DB_FILE
     ? process.env.DB_FILE
     : join(__dirname, process.env.DB_FILE)
   : join(__dirname, "data.sqlite");
+const databaseUrl = String(process.env.DATABASE_URL || "").trim();
 const legacyDataFile = process.env.DATA_FILE
   ? isAbsolute(process.env.DATA_FILE)
     ? process.env.DATA_FILE
@@ -72,10 +73,6 @@ const backupIntervalMinutes = Number(process.env.BACKUP_INTERVAL_MINUTES || 0);
 const rateLimiter = new Map();
 let backupTimer;
 
-if (isProduction && sessionSecret === "dev-only-change-me") {
-  throw new Error("SESSION_SECRET must be set in production");
-}
-
 const categories = new Set(["Personal", "Health", "Family", "Studies", "Ministry", "Other"]);
 const PASSWORD_PREFIX = "scrypt";
 const SCRYPT_N = 16384;
@@ -88,6 +85,18 @@ const ACCOUNT_ACTION_TOKEN_TTL_MINUTES = Number(process.env.ACCOUNT_ACTION_TOKEN
 const FIXED_ADMIN_ENABLED = String(process.env.FIXED_ADMIN_ENABLED || "true").trim().toLowerCase() !== "false";
 const FIXED_ADMIN_EMAIL = String(process.env.FIXED_ADMIN_EMAIL || "prayerbox@gmail.com").trim().toLowerCase();
 const FIXED_ADMIN_PASSWORD = String(process.env.FIXED_ADMIN_PASSWORD || "admin123").trim();
+
+if (isProduction) {
+  if (sessionSecret === "dev-only-change-me") {
+    throw new Error("SESSION_SECRET must be set in production");
+  }
+  if (allowedOrigins.size === 0) {
+    throw new Error("ALLOWED_ORIGINS must be set in production");
+  }
+  if (FIXED_ADMIN_ENABLED && (!FIXED_ADMIN_PASSWORD || FIXED_ADMIN_PASSWORD === "admin123")) {
+    throw new Error("FIXED_ADMIN_PASSWORD must be changed in production");
+  }
+}
 
 function base64UrlEncode(value) {
   return Buffer.from(value)
@@ -241,53 +250,59 @@ function sanitizeUsername(value) {
     .slice(0, 40);
 }
 
-function createAccountActionToken(userId, action) {
+async function createAccountActionToken(userId, action) {
   const confirmationToken = randomBytes(24).toString("hex");
   const tokenHash = hashToken(confirmationToken);
   const expiresAt = new Date(Date.now() + ACCOUNT_ACTION_TOKEN_TTL_MINUTES * 60 * 1000).toISOString();
   const createdAt = new Date().toISOString();
 
-  db.prepare(
+  await db.run(
     `INSERT INTO account_action_tokens
       (userId, action, tokenHash, expiresAt, usedAt, createdAt)
       VALUES (?, ?, ?, ?, NULL, ?)`
-  ).run(Number(userId), String(action), tokenHash, expiresAt, createdAt);
+    ,
+    Number(userId),
+    String(action),
+    tokenHash,
+    expiresAt,
+    createdAt
+  );
 
   return { confirmationToken, expiresAt };
 }
 
-function consumeAccountActionToken(userId, action, confirmationToken) {
+async function consumeAccountActionToken(userId, action, confirmationToken) {
   const tokenHash = hashToken(String(confirmationToken || "").trim());
-  const row = db.prepare(
+  const row = await db.get(
     `SELECT id, userId, action, expiresAt, usedAt
       FROM account_action_tokens
       WHERE userId = ? AND action = ? AND tokenHash = ?
-      ORDER BY id DESC LIMIT 1`
-  ).get(Number(userId), String(action), tokenHash);
+      ORDER BY id DESC LIMIT 1`,
+    Number(userId),
+    String(action),
+    tokenHash
+  );
 
   if (!row) return false;
   if (row.usedAt) return false;
   if (new Date(row.expiresAt).getTime() < Date.now()) return false;
 
-  db.prepare("UPDATE account_action_tokens SET usedAt = ? WHERE id = ?")
-    .run(new Date().toISOString(), Number(row.id));
+  await db.run("UPDATE account_action_tokens SET usedAt = ? WHERE id = ?", new Date().toISOString(), Number(row.id));
   return true;
 }
 
-function getSessionById(sessionId) {
-  return db
-    .prepare("SELECT id, userId, refreshTokenHash, expiresAt, revokedAt FROM auth_sessions WHERE id = ?")
-    .get(String(sessionId));
+async function getSessionById(sessionId) {
+  return db.get("SELECT id, userId, refreshTokenHash, expiresAt, revokedAt FROM auth_sessions WHERE id = ?", String(sessionId));
 }
 
-function getAuthContext(req) {
+async function getAuthContext(req) {
   const authorization = String(req.headers.authorization || "");
   if (!authorization.startsWith("Bearer ")) return null;
   const token = authorization.slice(7).trim();
   const payload = verifySignedToken(token);
   if (!payload || payload.typ !== TOKEN_KIND_ACCESS || !payload.sid) return null;
 
-  const session = getSessionById(payload.sid);
+  const session = await getSessionById(payload.sid);
   if (!session) return null;
   if (session.revokedAt) return null;
   if (new Date(session.expiresAt).getTime() < Date.now()) return null;
@@ -300,14 +315,14 @@ function getAuthContext(req) {
   };
 }
 
-function requireAuth(req) {
-  const auth = getAuthContext(req);
+async function requireAuth(req) {
+  const auth = await getAuthContext(req);
   if (!auth) throw new HttpError(401, "Authentication required");
   return auth;
 }
 
-function requireAdmin(req) {
-  const auth = requireAuth(req);
+async function requireAdmin(req) {
+  const auth = await requireAuth(req);
   if (auth.role !== "admin") throw new HttpError(403, "Admin access required");
   return auth;
 }
@@ -334,11 +349,84 @@ const initialData = {
   ]
 };
 
-const db = new Database(dbFile);
-db.pragma("journal_mode = WAL");
+const db = await createDbClient({ databaseUrl, dbFile });
+await db.pragma("journal_mode = WAL");
 
-function setupSchema() {
-  db.exec(`
+async function setupSchema() {
+  if (db.dialect === "postgres") {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        username TEXT,
+        email TEXT NOT NULL UNIQUE,
+        phone TEXT,
+        avatar TEXT,
+        bio TEXT,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'user',
+        accountStatus TEXT NOT NULL DEFAULT 'active',
+        createdAt TIMESTAMPTZ NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS prayers (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        request TEXT NOT NULL,
+        category TEXT NOT NULL,
+        prayerCount INTEGER NOT NULL DEFAULT 0,
+        approved BOOLEAN NOT NULL DEFAULT TRUE,
+        urgent BOOLEAN NOT NULL DEFAULT FALSE
+      );
+
+      CREATE TABLE IF NOT EXISTS testimonies (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        text TEXT NOT NULL,
+        category TEXT NOT NULL,
+        daysAgo INTEGER NOT NULL DEFAULT 0,
+        prayerCount INTEGER NOT NULL DEFAULT 0,
+        approved BOOLEAN NOT NULL DEFAULT TRUE
+      );
+
+      CREATE TABLE IF NOT EXISTS auth_sessions (
+        id TEXT PRIMARY KEY,
+        userId INTEGER NOT NULL REFERENCES users(id),
+        refreshTokenHash TEXT NOT NULL,
+        expiresAt TIMESTAMPTZ NOT NULL,
+        revokedAt TIMESTAMPTZ,
+        createdAt TIMESTAMPTZ NOT NULL,
+        lastUsedAt TIMESTAMPTZ NOT NULL,
+        ipAddress TEXT,
+        userAgent TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id SERIAL PRIMARY KEY,
+        actorUserId INTEGER,
+        actorEmail TEXT,
+        action TEXT NOT NULL,
+        entityType TEXT NOT NULL,
+        entityId TEXT,
+        metadata JSONB,
+        ipAddress TEXT,
+        createdAt TIMESTAMPTZ NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS account_action_tokens (
+        id SERIAL PRIMARY KEY,
+        userId INTEGER NOT NULL REFERENCES users(id),
+        action TEXT NOT NULL,
+        tokenHash TEXT NOT NULL,
+        expiresAt TIMESTAMPTZ NOT NULL,
+        usedAt TIMESTAMPTZ,
+        createdAt TIMESTAMPTZ NOT NULL
+      );
+    `);
+    return;
+  }
+
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -410,22 +498,22 @@ function setupSchema() {
   `);
 }
 
-function ensureSchemaMigrations() {
-  const columns = db.prepare("PRAGMA table_info(users)").all();
+async function ensureSchemaMigrations() {
+  const columns = await db.pragma("table_info(users)");
   if (!columns.some((column) => column.name === "role")) {
-    db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
+    await db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
   }
   if (!columns.some((column) => column.name === "username")) {
-    db.exec("ALTER TABLE users ADD COLUMN username TEXT");
+    await db.exec("ALTER TABLE users ADD COLUMN username TEXT");
   }
   if (!columns.some((column) => column.name === "bio")) {
-    db.exec("ALTER TABLE users ADD COLUMN bio TEXT");
+    await db.exec("ALTER TABLE users ADD COLUMN bio TEXT");
   }
   if (!columns.some((column) => column.name === "accountStatus")) {
-    db.exec("ALTER TABLE users ADD COLUMN accountStatus TEXT NOT NULL DEFAULT 'active'");
+    await db.exec("ALTER TABLE users ADD COLUMN accountStatus TEXT NOT NULL DEFAULT 'active'");
   }
 
-  db.exec(`
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS account_action_tokens (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       userId INTEGER NOT NULL,
@@ -521,116 +609,114 @@ function rowToTestimony(row) {
   };
 }
 
-function getState() {
+async function getState() {
   return {
-    users: db.prepare("SELECT * FROM users ORDER BY id").all().map(rowToUser),
-    prayers: db.prepare("SELECT * FROM prayers ORDER BY id").all().map(rowToPrayer),
-    testimonies: db.prepare("SELECT * FROM testimonies ORDER BY id").all().map(rowToTestimony),
+    users: (await db.all("SELECT * FROM users ORDER BY id")).map(rowToUser),
+    prayers: (await db.all("SELECT * FROM prayers ORDER BY id")).map(rowToPrayer),
+    testimonies: (await db.all("SELECT * FROM testimonies ORDER BY id")).map(rowToTestimony),
   };
 }
 
-function seedIfEmpty(data) {
-  const hasUsers = db.prepare("SELECT COUNT(1) AS count FROM users").get().count > 0;
-  const hasPrayers = db.prepare("SELECT COUNT(1) AS count FROM prayers").get().count > 0;
-  const hasTestimonies = db.prepare("SELECT COUNT(1) AS count FROM testimonies").get().count > 0;
+async function seedIfEmpty(data) {
+  const hasUsers = (await db.get("SELECT COUNT(1) AS count FROM users")).count > 0;
+  const hasPrayers = (await db.get("SELECT COUNT(1) AS count FROM prayers")).count > 0;
+  const hasTestimonies = (await db.get("SELECT COUNT(1) AS count FROM testimonies")).count > 0;
 
-  const insertUser = db.prepare(
-    "INSERT INTO users (id, name, email, phone, avatar, password, role, createdAt) VALUES (@id, @name, @email, @phone, @avatar, @password, @role, @createdAt)"
-  );
-  const insertPrayer = db.prepare(
-    "INSERT INTO prayers (id, name, request, category, prayerCount, approved, urgent) VALUES (@id, @name, @request, @category, @prayerCount, @approved, @urgent)"
-  );
-  const insertTestimony = db.prepare(
-    "INSERT INTO testimonies (id, name, text, category, daysAgo, prayerCount, approved) VALUES (@id, @name, @text, @category, @daysAgo, @prayerCount, @approved)"
-  );
-
-  const tx = db.transaction(() => {
+  await db.transaction(async () => {
     if (!hasUsers) {
       for (const user of data.users || []) {
-        insertUser.run({
-          id: Number(user.id),
-          name: sanitizeText(user.name, 30),
-          email: sanitizeText(user.email, 120).toLowerCase(),
-          phone: sanitizeText(user.phone, 20),
-          avatar: String(user.avatar || "").trim().slice(0, 5_000_000),
-          password: hashPassword(String(user.password || "")),
-          role: roleForEmail(user.email),
-          createdAt: user.createdAt || new Date().toISOString(),
-        });
+        await db.run(
+          "INSERT INTO users (id, name, email, phone, avatar, password, role, createdAt) VALUES (@id, @name, @email, @phone, @avatar, @password, @role, @createdAt)",
+          {
+            id: Number(user.id),
+            name: sanitizeText(user.name, 30),
+            email: sanitizeText(user.email, 120).toLowerCase(),
+            phone: sanitizeText(user.phone, 20),
+            avatar: String(user.avatar || "").trim().slice(0, 5_000_000),
+            password: hashPassword(String(user.password || "")),
+            role: roleForEmail(user.email),
+            createdAt: user.createdAt || new Date().toISOString(),
+          }
+        );
       }
     }
 
     if (!hasPrayers) {
       for (const prayer of data.prayers || []) {
-        insertPrayer.run({
-          id: Number(prayer.id),
-          name: sanitizeText(prayer.name, 15),
-          request: sanitizeText(prayer.request, 500),
-          category: categories.has(prayer.category) ? prayer.category : "Personal",
-          prayerCount: Number(prayer.prayerCount || 0),
-          approved: prayer.approved ? 1 : 0,
-          urgent: prayer.urgent ? 1 : 0,
-        });
+        await db.run(
+          "INSERT INTO prayers (id, name, request, category, prayerCount, approved, urgent) VALUES (@id, @name, @request, @category, @prayerCount, @approved, @urgent)",
+          {
+            id: Number(prayer.id),
+            name: sanitizeText(prayer.name, 15),
+            request: sanitizeText(prayer.request, 500),
+            category: categories.has(prayer.category) ? prayer.category : "Personal",
+            prayerCount: Number(prayer.prayerCount || 0),
+            approved: prayer.approved ? 1 : 0,
+            urgent: prayer.urgent ? 1 : 0,
+          }
+        );
       }
     }
 
     if (!hasTestimonies) {
       for (const testimony of data.testimonies || []) {
-        insertTestimony.run({
-          id: Number(testimony.id),
-          name: sanitizeText(testimony.name, 15),
-          text: sanitizeText(testimony.text, 400),
-          category: categories.has(testimony.category) ? testimony.category : "Personal",
-          daysAgo: Number(testimony.daysAgo || 0),
-          prayerCount: Number(testimony.prayerCount || 0),
-          approved: testimony.approved ? 1 : 0,
-        });
+        await db.run(
+          "INSERT INTO testimonies (id, name, text, category, daysAgo, prayerCount, approved) VALUES (@id, @name, @text, @category, @daysAgo, @prayerCount, @approved)",
+          {
+            id: Number(testimony.id),
+            name: sanitizeText(testimony.name, 15),
+            text: sanitizeText(testimony.text, 400),
+            category: categories.has(testimony.category) ? testimony.category : "Personal",
+            daysAgo: Number(testimony.daysAgo || 0),
+            prayerCount: Number(testimony.prayerCount || 0),
+            approved: testimony.approved ? 1 : 0,
+          }
+        );
       }
     }
-
-    db.prepare("UPDATE sqlite_sequence SET seq = (SELECT COALESCE(MAX(id), 0) FROM users) WHERE name = 'users'").run();
-    db.prepare("UPDATE sqlite_sequence SET seq = (SELECT COALESCE(MAX(id), 0) FROM prayers) WHERE name = 'prayers'").run();
-    db.prepare("UPDATE sqlite_sequence SET seq = (SELECT COALESCE(MAX(id), 0) FROM testimonies) WHERE name = 'testimonies'").run();
   });
 
-  tx();
+  if (db.dialect === "sqlite") {
+    if (!hasUsers) await db.run("UPDATE sqlite_sequence SET seq = (SELECT COALESCE(MAX(id), 0) FROM users) WHERE name = 'users'");
+    if (!hasPrayers) await db.run("UPDATE sqlite_sequence SET seq = (SELECT COALESCE(MAX(id), 0) FROM prayers) WHERE name = 'prayers'");
+    if (!hasTestimonies) await db.run("UPDATE sqlite_sequence SET seq = (SELECT COALESCE(MAX(id), 0) FROM testimonies) WHERE name = 'testimonies'");
+  } else {
+    if (!hasUsers) await db.run("SELECT setval(pg_get_serial_sequence('users', 'id'), COALESCE((SELECT MAX(id) FROM users), 1), true)");
+    if (!hasPrayers) await db.run("SELECT setval(pg_get_serial_sequence('prayers', 'id'), COALESCE((SELECT MAX(id) FROM prayers), 1), true)");
+    if (!hasTestimonies) await db.run("SELECT setval(pg_get_serial_sequence('testimonies', 'id'), COALESCE((SELECT MAX(id) FROM testimonies), 1), true)");
+  }
 }
 
-function migrateLegacyPlaintextPasswords() {
-  const users = db.prepare("SELECT id, password FROM users").all();
-  const updateUserPassword = db.prepare("UPDATE users SET password = ? WHERE id = ?");
+async function migrateLegacyPlaintextPasswords() {
+  const users = await db.all("SELECT id, password FROM users");
 
-  const tx = db.transaction(() => {
+  const migratedCount = await db.transaction(async () => {
     let migrated = 0;
 
     for (const user of users) {
       if (isHashedPassword(user.password)) continue;
-      updateUserPassword.run(hashPassword(String(user.password || "")), Number(user.id));
+      await db.run("UPDATE users SET password = ? WHERE id = ?", hashPassword(String(user.password || "")), Number(user.id));
       migrated += 1;
     }
 
     return migrated;
   });
-
-  const migratedCount = tx();
   if (migratedCount > 0) {
     console.log(`Migrated ${migratedCount} legacy plaintext password(s) to secure hashes.`);
   }
 }
 
-function syncAdminRoles() {
+async function syncAdminRoles() {
   if (adminEmails.size === 0) return;
 
-  const tx = db.transaction(() => {
+  await db.transaction(async () => {
     for (const email of adminEmails) {
-      db.prepare("UPDATE users SET role = 'admin' WHERE lower(email) = ?").run(email);
+      await db.run("UPDATE users SET role = 'admin' WHERE lower(email) = ?", email);
     }
   });
-
-  tx();
 }
 
-function ensureFixedAdminAccount() {
+async function ensureFixedAdminAccount() {
   if (!FIXED_ADMIN_ENABLED) return;
 
   const email = FIXED_ADMIN_EMAIL.toLowerCase();
@@ -639,32 +725,35 @@ function ensureFixedAdminAccount() {
   const nowIso = new Date().toISOString();
   const passwordHash = hashPassword(FIXED_ADMIN_PASSWORD);
 
-  const existing = db
-    .prepare("SELECT id FROM users WHERE lower(email) = ?")
-    .get(email);
+  const existing = await db.get("SELECT id FROM users WHERE lower(email) = ?", email);
 
   if (existing?.id) {
-    db.prepare(
-      "UPDATE users SET role = 'admin', accountStatus = 'active', password = ? WHERE id = ?"
-    ).run(passwordHash, Number(existing.id));
+    await db.run("UPDATE users SET role = 'admin', accountStatus = 'active', password = ? WHERE id = ?", passwordHash, Number(existing.id));
     return;
   }
 
-  db.prepare(
-    "INSERT INTO users (name, username, email, phone, avatar, bio, password, role, accountStatus, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, 'admin', 'active', ?)"
-  ).run("Prayerbox Admin", "prayerbox_admin", email, "", "", "", passwordHash, nowIso);
+  await db.run(
+    "INSERT INTO users (name, username, email, phone, avatar, bio, password, role, accountStatus, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, 'admin', 'active', ?)",
+    "Prayerbox Admin",
+    "prayerbox_admin",
+    email,
+    "",
+    "",
+    "",
+    passwordHash,
+    nowIso
+  );
 }
 
-function purgeExpiredSessions() {
-  db.prepare("DELETE FROM auth_sessions WHERE expiresAt < ?").run(new Date().toISOString());
+async function purgeExpiredSessions() {
+  await db.run("DELETE FROM auth_sessions WHERE expiresAt < ?", new Date().toISOString());
 }
 
-function purgeExpiredActionTokens() {
-  db.prepare("DELETE FROM account_action_tokens WHERE expiresAt < ? OR usedAt IS NOT NULL")
-    .run(new Date().toISOString());
+async function purgeExpiredActionTokens() {
+  await db.run("DELETE FROM account_action_tokens WHERE expiresAt < ? OR usedAt IS NOT NULL", new Date().toISOString());
 }
 
-function createSessionForUser(user, req) {
+async function createSessionForUser(user, req) {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + refreshTokenTtlSeconds * 1000);
   const sessionId = randomBytes(16).toString("hex");
@@ -673,11 +762,19 @@ function createSessionForUser(user, req) {
   const ipAddress = getClientIp(req);
   const userAgent = String(req.headers["user-agent"] || "").slice(0, 512);
 
-  db.prepare(
+  await db.run(
     `INSERT INTO auth_sessions
       (id, userId, refreshTokenHash, expiresAt, revokedAt, createdAt, lastUsedAt, ipAddress, userAgent)
-      VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`
-  ).run(sessionId, Number(user.id), refreshTokenHash, expiresAt.toISOString(), now.toISOString(), now.toISOString(), ipAddress, userAgent);
+      VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+    sessionId,
+    Number(user.id),
+    refreshTokenHash,
+    expiresAt.toISOString(),
+    now.toISOString(),
+    now.toISOString(),
+    ipAddress,
+    userAgent
+  );
 
   return {
     sessionId,
@@ -686,15 +783,13 @@ function createSessionForUser(user, req) {
   };
 }
 
-function rotateSessionRefreshToken(sessionId, user) {
+async function rotateSessionRefreshToken(sessionId, user) {
   const refreshToken = issueRefreshToken(user, sessionId);
   const refreshTokenHash = hashToken(refreshToken);
   const nowIso = new Date().toISOString();
   const expiresAt = new Date(Date.now() + refreshTokenTtlSeconds * 1000).toISOString();
 
-  db.prepare(
-    "UPDATE auth_sessions SET refreshTokenHash = ?, lastUsedAt = ?, expiresAt = ? WHERE id = ?"
-  ).run(refreshTokenHash, nowIso, expiresAt, sessionId);
+  await db.run("UPDATE auth_sessions SET refreshTokenHash = ?, lastUsedAt = ?, expiresAt = ? WHERE id = ?", refreshTokenHash, nowIso, expiresAt, sessionId);
 
   return {
     refreshToken,
@@ -702,32 +797,28 @@ function rotateSessionRefreshToken(sessionId, user) {
   };
 }
 
-function revokeSession(sessionId) {
-  db.prepare("UPDATE auth_sessions SET revokedAt = COALESCE(revokedAt, ?) WHERE id = ?")
-    .run(new Date().toISOString(), String(sessionId));
+async function revokeSession(sessionId) {
+  await db.run("UPDATE auth_sessions SET revokedAt = COALESCE(revokedAt, ?) WHERE id = ?", new Date().toISOString(), String(sessionId));
 }
 
-function revokeSessionsForUser(userId, excludeSessionId = "") {
+async function revokeSessionsForUser(userId, excludeSessionId = "") {
   const nowIso = new Date().toISOString();
   if (excludeSessionId) {
-    db.prepare(
-      "UPDATE auth_sessions SET revokedAt = COALESCE(revokedAt, ?) WHERE userId = ? AND id <> ?"
-    ).run(nowIso, Number(userId), String(excludeSessionId));
+    await db.run("UPDATE auth_sessions SET revokedAt = COALESCE(revokedAt, ?) WHERE userId = ? AND id <> ?", nowIso, Number(userId), String(excludeSessionId));
     return;
   }
 
-  db.prepare(
-    "UPDATE auth_sessions SET revokedAt = COALESCE(revokedAt, ?) WHERE userId = ?"
-  ).run(nowIso, Number(userId));
+  await db.run("UPDATE auth_sessions SET revokedAt = COALESCE(revokedAt, ?) WHERE userId = ?", nowIso, Number(userId));
 }
 
-function listSessionsForUser(userId, currentSessionId) {
-  const rows = db.prepare(
+async function listSessionsForUser(userId, currentSessionId) {
+  const rows = await db.all(
     `SELECT id, createdAt, lastUsedAt, expiresAt, revokedAt, ipAddress, userAgent
      FROM auth_sessions
      WHERE userId = ?
-     ORDER BY createdAt DESC`
-  ).all(Number(userId));
+     ORDER BY createdAt DESC`,
+    Number(userId)
+  );
 
   return rows.map((item) => ({
     id: item.id,
@@ -741,12 +832,11 @@ function listSessionsForUser(userId, currentSessionId) {
   }));
 }
 
-function writeAuditLog(req, auth, action, entityType, entityId, metadata = {}) {
-  db.prepare(
+async function writeAuditLog(req, auth, action, entityType, entityId, metadata = {}) {
+  await db.run(
     `INSERT INTO audit_logs
       (actorUserId, actorEmail, action, entityType, entityId, metadata, ipAddress, createdAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     auth ? Number(auth.userId) : null,
     auth ? String(auth.email || "") : null,
     String(action),
@@ -791,17 +881,17 @@ async function migrateLegacyJson() {
     const content = await readFile(legacyDataFile, "utf8");
     const data = JSON.parse(content);
     if (!data || typeof data !== "object") {
-      seedIfEmpty(initialData);
+      await seedIfEmpty(initialData);
       return;
     }
-    seedIfEmpty({
+    await seedIfEmpty({
       users: Array.isArray(data.users) ? data.users : initialData.users,
       prayers: Array.isArray(data.prayers) ? data.prayers : initialData.prayers,
       testimonies: Array.isArray(data.testimonies) ? data.testimonies : initialData.testimonies,
     });
   } catch (error) {
     if (error && error.code === "ENOENT") {
-      seedIfEmpty(initialData);
+      await seedIfEmpty(initialData);
       return;
     }
     throw error;
@@ -874,7 +964,7 @@ async function handleRequest(req, res) {
 
   if (method === "GET" && path === "/api/state") {
     const auth = getAuthContext(req);
-    const state = getState();
+    const state = await getState();
     if (!auth || auth.role !== "admin") {
       state.users = [];
     }
@@ -970,7 +1060,7 @@ async function handleRequest(req, res) {
       createdAt,
     };
 
-    const session = createSessionForUser(user, req);
+    const session = await createSessionForUser(user, req);
 
     sendJson(res, 201, {
       user,
@@ -1004,7 +1094,7 @@ async function handleRequest(req, res) {
     }
 
     const safeUser = buildSafeUser(user);
-    const session = createSessionForUser(safeUser, req);
+    const session = await createSessionForUser(safeUser, req);
     sendJson(res, 200, { user: safeUser, token: session.accessToken, refreshToken: session.refreshToken });
     return;
   }
@@ -1019,59 +1109,59 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const session = getSessionById(payload.sid);
+    const session = await getSessionById(payload.sid);
     if (!session || session.revokedAt) {
       sendJson(res, 401, { error: "Session has been revoked" });
       return;
     }
 
     if (new Date(session.expiresAt).getTime() < Date.now()) {
-      revokeSession(payload.sid);
+      await revokeSession(payload.sid);
       sendJson(res, 401, { error: "Session has expired" });
       return;
     }
 
     if (hashToken(refreshToken) !== session.refreshTokenHash) {
-      revokeSession(payload.sid);
+      await revokeSession(payload.sid);
       sendJson(res, 401, { error: "Refresh token mismatch" });
       return;
     }
 
     const user = db.prepare("SELECT id, name, username, email, phone, avatar, bio, role, accountStatus, createdAt FROM users WHERE id = ?").get(Number(payload.sub));
     if (!user) {
-      revokeSession(payload.sid);
+      await revokeSession(payload.sid);
       sendJson(res, 401, { error: "User no longer exists" });
       return;
     }
 
     if (user.accountStatus === "deactivated") {
-      revokeSession(payload.sid);
+      await revokeSession(payload.sid);
       sendJson(res, 403, { error: "Account is deactivated" });
       return;
     }
 
     const safeUser = buildSafeUser(user);
-    const next = rotateSessionRefreshToken(payload.sid, safeUser);
+    const next = await rotateSessionRefreshToken(payload.sid, safeUser);
     sendJson(res, 200, { user: safeUser, token: next.accessToken, refreshToken: next.refreshToken });
     return;
   }
 
   if (method === "POST" && path === "/api/auth/logout") {
-    const auth = requireAuth(req);
-    revokeSession(auth.sessionId);
+    const auth = await requireAuth(req);
+    await revokeSession(auth.sessionId);
     sendJson(res, 200, { ok: true });
     return;
   }
 
   if (method === "POST" && path === "/api/auth/logout-all") {
-    const auth = requireAuth(req);
+    const auth = await requireAuth(req);
     const body = await readBody(req);
     const includeCurrent = Boolean(body.includeCurrent);
 
     if (includeCurrent) {
-      revokeSessionsForUser(auth.userId);
+      await revokeSessionsForUser(auth.userId);
     } else {
-      revokeSessionsForUser(auth.userId, auth.sessionId);
+      await revokeSessionsForUser(auth.userId, auth.sessionId);
     }
 
     writeAuditLog(req, auth, "logout_all_sessions", "session", auth.sessionId, {
@@ -1082,16 +1172,16 @@ async function handleRequest(req, res) {
   }
 
   if (method === "GET" && path === "/api/auth/sessions") {
-    const auth = requireAuth(req);
+    const auth = await requireAuth(req);
     sendJson(res, 200, {
-      sessions: listSessionsForUser(auth.userId, auth.sessionId),
+      sessions: await listSessionsForUser(auth.userId, auth.sessionId),
     });
     return;
   }
 
   const authSessionMatch = path.match(/^\/api\/auth\/sessions\/([a-fA-F0-9]+)$/);
   if (authSessionMatch && method === "DELETE") {
-    const auth = requireAuth(req);
+    const auth = await requireAuth(req);
     const targetSessionId = String(authSessionMatch[1]);
     const target = db.prepare("SELECT id, userId, revokedAt FROM auth_sessions WHERE id = ?").get(targetSessionId);
 
@@ -1105,7 +1195,7 @@ async function handleRequest(req, res) {
       return;
     }
 
-    revokeSession(targetSessionId);
+    await revokeSession(targetSessionId);
     writeAuditLog(req, auth, "revoke_session", "session", targetSessionId, {
       targetUserId: Number(target.userId),
       alreadyRevoked: Boolean(target.revokedAt),
@@ -1115,7 +1205,7 @@ async function handleRequest(req, res) {
   }
 
   if (method === "GET" && path === "/api/auth/me") {
-    const auth = requireAuth(req);
+    const auth = await requireAuth(req);
     const user = db
       .prepare("SELECT id, name, username, email, phone, avatar, bio, role, accountStatus, createdAt FROM users WHERE id = ?")
       .get(auth.userId);
@@ -1135,7 +1225,7 @@ async function handleRequest(req, res) {
   }
 
   if (method === "PATCH" && path === "/api/auth/profile") {
-    const auth = requireAuth(req);
+    const auth = await requireAuth(req);
     const body = await readBody(req);
     const current = db.prepare("SELECT id, name, username, email, phone, avatar, bio, role, accountStatus, createdAt FROM users WHERE id = ?").get(auth.userId);
     if (!current) {
@@ -1180,7 +1270,7 @@ async function handleRequest(req, res) {
   }
 
   if (method === "POST" && path === "/api/auth/change-email") {
-    const auth = requireAuth(req);
+    const auth = await requireAuth(req);
     const body = await readBody(req);
     const email = sanitizeText(body.email, 120).toLowerCase();
     const password = String(body.password || "").trim();
@@ -1210,7 +1300,7 @@ async function handleRequest(req, res) {
   }
 
   if (method === "POST" && path === "/api/auth/change-password") {
-    const auth = requireAuth(req);
+    const auth = await requireAuth(req);
     const body = await readBody(req);
     const currentPassword = String(body.currentPassword || "").trim();
     const newPassword = String(body.newPassword || "").trim();
@@ -1239,7 +1329,7 @@ async function handleRequest(req, res) {
   }
 
   if (method === "POST" && path === "/api/auth/account-actions/request") {
-    const auth = requireAuth(req);
+    const auth = await requireAuth(req);
     const body = await readBody(req);
     const action = String(body.action || "").trim();
     if (action !== "deactivate" && action !== "delete") {
@@ -1247,14 +1337,14 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const token = createAccountActionToken(auth.userId, action);
+    const token = await createAccountActionToken(auth.userId, action);
     writeAuditLog(req, auth, "request_account_action_token", "user", auth.userId, { action });
     sendJson(res, 200, { ok: true, action, confirmationToken: token.confirmationToken, expiresAt: token.expiresAt });
     return;
   }
 
   if (method === "POST" && path === "/api/auth/account-actions/confirm") {
-    const auth = requireAuth(req);
+    const auth = await requireAuth(req);
     const body = await readBody(req);
     const action = String(body.action || "").trim();
     const confirmationToken = String(body.confirmationToken || "").trim();
@@ -1263,7 +1353,7 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const valid = consumeAccountActionToken(auth.userId, action, confirmationToken);
+    const valid = await consumeAccountActionToken(auth.userId, action, confirmationToken);
     if (!valid) {
       sendJson(res, 401, { error: "Invalid or expired confirmation token" });
       return;
@@ -1277,12 +1367,11 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const tx = db.transaction(() => {
+    await db.transaction(async () => {
       db.prepare("DELETE FROM account_action_tokens WHERE userId = ?").run(auth.userId);
       db.prepare("DELETE FROM auth_sessions WHERE userId = ?").run(auth.userId);
       db.prepare("DELETE FROM users WHERE id = ?").run(auth.userId);
     });
-    tx();
     writeAuditLog(req, auth, "delete_own_account", "user", auth.userId);
     sendJson(res, 200, { ok: true, action: "delete", deleted: true });
     return;
@@ -1310,7 +1399,7 @@ async function handleRequest(req, res) {
 
   const userMatch = path.match(/^\/api\/users\/(\d+)$/);
   if (userMatch) {
-    const auth = requireAuth(req);
+    const auth = await requireAuth(req);
     const id = Number(userMatch[1]);
     const user = db.prepare("SELECT id FROM users WHERE id = ?").get(id);
     if (!user) {
@@ -1425,14 +1514,14 @@ async function handleRequest(req, res) {
   notFound(res);
 }
 
-setupSchema();
-ensureSchemaMigrations();
+await setupSchema();
+await ensureSchemaMigrations();
 await migrateLegacyJson();
-migrateLegacyPlaintextPasswords();
-syncAdminRoles();
-ensureFixedAdminAccount();
-purgeExpiredSessions();
-purgeExpiredActionTokens();
+await migrateLegacyPlaintextPasswords();
+await syncAdminRoles();
+await ensureFixedAdminAccount();
+await purgeExpiredSessions();
+await purgeExpiredActionTokens();
 scheduleBackupsIfEnabled();
 
 const server = createServer((req, res) => {
