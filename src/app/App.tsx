@@ -3131,6 +3131,9 @@ export default function App() {
     setCurrentUser(user);
     setApiNotice("");
     navigate(hasAdminAccess(user) ? "admin-dashboard" : "submit");
+    refreshState().catch(() => {
+      setApiNotice("Unable to refresh accounts from the backend.");
+    });
   };
 
   const handleDeleteUser = async (id: number) => {
