@@ -963,7 +963,7 @@ async function handleRequest(req, res) {
   }
 
   if (method === "GET" && path === "/api/state") {
-    const auth = getAuthContext(req);
+    const auth = await getAuthContext(req);
     const state = await getState();
     if (!auth || auth.role !== "admin") {
       state.users = [];
